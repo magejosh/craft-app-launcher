@@ -1,0 +1,16 @@
+/.build/
+/target/
+/dist/
+/craft-launcher.conf
+/craft-launcher.log
+# Local design/QA workspace; not required to build or run the launcher.
+/design/
+# Generated sentinel build intermediates; sentinel.exe is an intentional test fixture.
+/tests/fixtures/*.obj
+/tests/fixtures/*.res
+# Runtime state must not be committed when running beside a source checkout.
+/craft-launcher.owner
+/craft-launcher.plans.json
+/craft-launcher.conf.*
+/craft-launcher.log.*
+/craft-launcher.plans.*.tmp

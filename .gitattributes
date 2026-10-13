@@ -1,0 +1,4 @@
+# Preserve upstream notice text; its original whitespace is intentional.
+licenses/** -whitespace
+# The synthetic PE fixture must stay byte-for-byte binary.
+*.exe binary
