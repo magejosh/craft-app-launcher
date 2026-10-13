@@ -1,6 +1,6 @@
 # Craft App Launcher v0.1.0
 
-A portable, native Windows x64 launcher for Craft applications. Choose your apps folder, launch a selected version, and install verified portable updates side by side. No fixed drive letter or `reCraft` folder is required.
+A portable, native Windows x64 launcher focused on portable versions of Craft applications in an apps folder you choose. Launch a selected version and install verified portable updates side by side. No fixed drive letter or `reCraft` folder is required.
 
 ## Requirements
 
@@ -15,9 +15,27 @@ Windows x64 with the Microsoft Visual C++ v14 x64 runtime. If Windows reports a 
 
 Settings and logs are saved beside the launcher. You can move the launcher and apps together while preserving their relative layout on the same drive. If a saved root becomes unavailable, choose it again in Settings.
 
+## Supported apps
+
+The launcher recognizes portable installations of these twelve apps under your selected apps root. Each link opens the app's official repository:
+
+- [CADCraft](https://github.com/storytold/cadcraft)
+- [DeckCraft](https://github.com/storytold/deckcraft)
+- [DesignCraft](https://github.com/storytold/designcraft)
+- [EffectCraft](https://github.com/storytold/effectcraft)
+- [FilmCraft](https://github.com/storytold/filmcraft)
+- [GridCraft](https://github.com/storytold/gridcraft)
+- [LightCraft](https://github.com/storytold/lightcraft)
+- [PDFCraft](https://github.com/storytold/pdfcraft)
+- [PhotoCraft](https://github.com/storytold/photocraft)
+- [SoundCraft](https://github.com/storytold/soundcraft)
+- [VectorCraft](https://github.com/storytold/vectorcraft)
+- [WordCraft](https://github.com/storytold/wordcraft)
+
+If you prefer the official launcher, see [ArtCraft Launcher](https://github.com/storytold/craft-launcher) from the ArtCraft team. It installs, updates, and opens apps in the Craft suite; its README covers supported platforms and download options.
+
 ## Features
 
-- Twelve app families: CADCraft, DeckCraft, DesignCraft, EffectCraft, FilmCraft, GridCraft, LightCraft, PDFCraft, PhotoCraft, SoundCraft, VectorCraft, and WordCraft.
 - Exact GUI/CLI executable-name discovery without running apps to identify them; conservative PE file-version reporting and explicit version selection.
 - Named profiles with per-app arguments and per-computer FilmCraft compatibility settings.
 - Three Settings pages: Launcher Settings, Appearance, and Updates.
