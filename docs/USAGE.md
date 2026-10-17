@@ -4,7 +4,7 @@
 
 Choose a folder containing your portable Craft installations. Browse validates, saves, and scans the chosen folder; use Scan after typing a path. Failed validation preserves the previous saved root. Discovery runs in the background.
 
-An installation is recognized by the exact, case-insensitive `<app-id>.exe` and/or `<app-id>-cli.exe` filename, such as `filmcraft.exe`. Identification never runs the executable. These names are not proof of authenticity: use apps from sources you trust.
+An installation is recognized by the exact, case-insensitive `<app-id>.exe` and/or `<app-id>-cli.exe` filename, such as `filmcraft.exe` or `figcraft.exe` (FigCraft CLI: `figcraft-cli.exe`). Identification never runs the executable. These names are not proof of authenticity: use apps from sources you trust.
 
 The scanner searches up to four levels below the root and at most 20,000 directory entries. It stops descending into recognized installation folders. Keep versions in sibling folders. Junctions and other reparse points are excluded, including roots reached through reparse-point ancestors. Scan warnings explain inaccessible entries and limits.
 
@@ -12,7 +12,11 @@ Installed versions come from fixed PE file-version metadata, using the GUI execu
 
 ## Launch and rollback
 
-Click a tile for its selected GUI. Use its context menu or App settings to choose an installed version. Multiple installations need an explicit choice unless a saved choice remains valid. CLI launches are available through the agent with an explicit installation and profile.
+The thirteen apps appear as circular workflow nodes connected across document, visual, and motion/audio clusters. Node positions and diameters scale with the client area down to the minimum window size, without a launcher scrollbar. The circular hit areas exclude their bounding-box corners. The header shows the original launcher icon, full title, selected apps root, and profile.
+
+Click a node for its selected GUI. Tab moves through native controls; arrow keys move between nodes by direction, and Space or Enter activates the focused node. Right-click or the keyboard context-menu command opens version choices and app options. Multiple installations need an explicit choice unless a saved choice remains valid. CLI launches are available through the agent with an explicit installation and profile. See [layout and input details](circular-launcher.md).
+
+Closing Settings with Done returns focus to the main launcher when Settings is foreground. If you have switched to another application, closing Settings does not bring the launcher forward.
 
 App settings stores one literal argument per line. For example:
 

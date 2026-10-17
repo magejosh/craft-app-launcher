@@ -5,6 +5,11 @@ pub type Hwnd = isize;
 pub type Handle = isize;
 pub type Lresult = isize;
 pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> { s.as_ref().encode_wide().chain(Some(0)).collect() }
+// LR_SHARED keeps these class icons alive for the process lifetime.
+pub unsafe fn launcher_icon(instance:Handle,small:bool)->Handle {
+    let (cx,cy)=if small{(49,50)}else{(11,12)}; // SM_CX/CYSMICON or SM_CX/CYICON
+    LoadImageW(instance,101usize as *const u16,1,GetSystemMetrics(cx),GetSystemMetrics(cy),0x8000)
+}
 #[repr(C)] pub struct Point { pub x:i32, pub y:i32 }
 #[repr(C)] pub struct Msg { pub hwnd:Hwnd, pub message:u32, pub wparam:usize, pub lparam:isize, pub time:u32, pub pt:Point, pub private:u32 }
 #[derive(Clone, Copy)]
@@ -20,6 +25,10 @@ pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> { s.as_ref().encode_wide().chain(S
     pub fn CreateWindowExW(ex:u32,class:*const u16,title:*const u16,style:u32,x:i32,y:i32,width:i32,height:i32,parent:Hwnd,menu:Handle,instance:Handle,param:*mut c_void)->Hwnd;
     pub fn DefWindowProcW(hwnd:Hwnd,msg:u32,w:usize,l:isize)->Lresult;
     pub fn IsIconic(hwnd:Hwnd)->i32;
+    pub fn GetForegroundWindow()->Hwnd;
+    fn GetWindow(hwnd:Hwnd,command:u32)->Hwnd;
+    fn SetForegroundWindow(hwnd:Hwnd)->i32;
+    fn SetActiveWindow(hwnd:Hwnd)->Hwnd;
     pub fn IsWindowVisible(hwnd:Hwnd)->i32;
     pub fn GetWindowLongPtrW(hwnd:Hwnd,index:i32)->isize;
     fn SetWindowLongPtrW(hwnd:Hwnd,index:i32,value:isize)->isize;
@@ -59,6 +68,8 @@ pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> { s.as_ref().encode_wide().chain(S
     pub fn MessageBoxW(hwnd:Hwnd,text:*const u16,caption:*const u16,kind:u32)->i32;
     pub fn LoadCursorW(instance:Handle,name:*const u16)->Handle;
     pub fn LoadIconW(instance:Handle,name:*const u16)->Handle;
+    fn LoadImageW(instance:Handle,name:*const u16,kind:u32,width:i32,height:i32,flags:u32)->Handle;
+    fn GetSystemMetrics(index:i32)->i32;
     pub fn DestroyIcon(icon:Handle)->i32;
     fn SetPropW(hwnd:Hwnd,name:*const u16,value:Handle)->i32;
     fn GetPropW(hwnd:Hwnd,name:*const u16)->Handle;
@@ -193,6 +204,90 @@ pub fn text(hwnd:Hwnd)->String {
 pub fn set_text(hwnd:Hwnd,value:&str) {if hwnd==0||text(hwnd)==value{return;}unsafe {SetWindowTextW(hwnd,wide(value).as_ptr());}}
 pub fn message(hwnd:Hwnd,text:&str) { unsafe { MessageBoxW(hwnd,wide(text).as_ptr(),wide("Craft App Launcher").as_ptr(),0x40); } }
 
+/// Only explicit dismissal of a foreground dialog may restore its launcher.
+fn dismissal_restores_launcher(dialog:Hwnd,foreground:Hwnd)->bool {dialog!=0&&dialog==foreground}
+#[test] fn dismissal_focus_policy_never_activates_from_background(){assert!(dismissal_restores_launcher(11,11));assert!(!dismissal_restores_launcher(11,22));assert!(!dismissal_restores_launcher(11,0));assert!(!dismissal_restores_launcher(0,0));}
+pub fn is_foreground_window(hwnd:Hwnd)->bool {unsafe{dismissal_restores_launcher(hwnd,GetAncestor(GetForegroundWindow(),2))}}
+// GA_ROOTOWNER follows GetParent, which misses owners of overlapped top-level windows.
+fn owner_root(hwnd:Hwnd)->Hwnd {unsafe {
+    let mut root=GetAncestor(hwnd,2);
+    while root!=0 {let owner=GetWindow(root,4);if owner==0{break;}root=owner;}
+    root
+}}
+#[test] fn completion_owner_chain_reaches_main_through_overlapped_settings(){unsafe {
+    struct Hidden(Hwnd);impl Drop for Hidden{fn drop(&mut self){unsafe{DestroyWindow(self.0);}}}
+    let create=|style,parent|{let hwnd=CreateWindowExW(0,wide("STATIC").as_ptr(),wide("owned hidden focus regression").as_ptr(),style,0,0,200,120,parent,0,GetModuleHandleW(ptr::null()),ptr::null_mut());assert_ne!(hwnd,0);assert_eq!(IsWindowVisible(hwnd),0);Hidden(hwnd)};
+    let main=create(0x00CF0000,0);let settings=create(0x00CF0000,main.0);let report=create(0x80C80000,settings.0);
+    assert_eq!(GetWindow(settings.0,4),main.0);assert_eq!(GetWindow(report.0,4),settings.0);
+    assert_eq!(GetAncestor(report.0,3),settings.0,"GA_ROOTOWNER stops at owned overlapped Settings");
+    assert_eq!(owner_root(settings.0),main.0);assert_eq!(owner_root(report.0),main.0);assert_eq!(owner_root(main.0),main.0);assert_eq!(owner_root(0),0);
+}}
+pub fn activate_window(hwnd:Hwnd){unsafe{if hwnd!=0&&IsWindowEnabled(hwnd)!=0&&IsWindowVisible(hwnd)!=0{SetForegroundWindow(hwnd);SetActiveWindow(hwnd);SetFocus(hwnd);}}}
+
+// A bounded modal report owns its presentation data; paint/selection never borrow UI State.
+struct CompletionReport {rows:Vec<(String,String)>,font:Handle,restore_focus:std::cell::Cell<bool>}
+unsafe fn close_completion(hwnd:Hwnd){
+    let data=GetPropW(hwnd,wide("CraftLauncher.CompletionData").as_ptr())as *const CompletionReport;
+    if !data.is_null(){(*data).restore_focus.set(is_foreground_window(hwnd));}
+    DestroyWindow(hwnd);
+}
+unsafe fn completion_detail(edit:Hwnd,value:&str) {
+    #[link(name="user32")] extern "system" {fn ShowScrollBar(hwnd:Hwnd,bar:i32,show:i32)->i32;fn GetDC(hwnd:Hwnd)->Handle;fn ReleaseDC(hwnd:Hwnd,dc:Handle)->i32;}
+    ShowScrollBar(edit,1,0);set_text(edit,value);
+    SendMessageW(edit,0xB1,0,0);let first=SendMessageW(edit,0xCE,0,0);SendMessageW(edit,0xB6,0,-first);
+    // Count the edit's wrapped lines at its full width, using its actual font height.
+    let dc=GetDC(edit);if dc==0{ShowScrollBar(edit,1,1);return;}
+    let previous=SelectObject(dc,SendMessageW(edit,0x31,0,0));let mut line:Rect=std::mem::zeroed();
+    let height=DrawTextW(dc,wide("Ag").as_ptr(),-1,&mut line,0x400|0x20);SelectObject(dc,previous);ReleaseDC(edit,dc);
+    let mut area:Rect=std::mem::zeroed();SendMessageW(edit,0xB2,0,(&mut area as *mut Rect)as isize);
+    ShowScrollBar(edit,1,i32::from(height<=0||SendMessageW(edit,0xBA,0,0)*height as isize>(area.bottom-area.top)as isize));
+}
+unsafe extern "system" fn completion_proc(hwnd:Hwnd,msg:u32,w:usize,l:isize)->Lresult {
+    match msg {
+        0x14=>erase_background(hwnd,w as Handle),
+        0x133..=0x138=>control_color(w as Handle,msg,l),
+        0x2B if l!=0=>{draw_plain_button(&*(l as *const DrawItem));1},
+        0x111=>{
+            let id=(w&0xffff)as i32;
+            if id==1||id==2 {close_completion(hwnd);return 0;}
+            let data=GetPropW(hwnd,wide("CraftLauncher.CompletionData").as_ptr())as *const CompletionReport;
+            if !data.is_null(){let report=&*data;if let Some((label,detail))=report.rows.get((id-100)as usize){
+                set_text(GetDlgItem(hwnd,20),label);completion_detail(GetDlgItem(hwnd,21),detail);
+                for row in 0..report.rows.len(){selected_button(GetDlgItem(hwnd,100+row as i32),row as i32==id-100);}
+            }}0
+        },
+        0x10=>{close_completion(hwnd);0},
+        0x82=>{RemovePropW(hwnd,wide("CraftLauncher.CompletionData").as_ptr());DefWindowProcW(hwnd,msg,w,l)},
+        _=>DefWindowProcW(hwnd,msg,w,l),
+    }
+}
+/// All catalogue outcomes remain visible; only unusually long selected details need scrolling.
+pub fn completion_report(owner:Hwnd,summary:&str,rows:Vec<(String,String)>) {
+    unsafe {
+        #[link(name="user32")] extern "system" {fn IsWindow(hwnd:Hwnd)->i32;fn GetAncestor(hwnd:Hwnd,flags:u32)->Hwnd;}
+        let instance=GetModuleHandleW(ptr::null());let name=wide("CraftLauncherCompletion");
+        let class=WndClass{size:std::mem::size_of::<WndClass>()as u32,style:0,procedure:Some(completion_proc),cls_extra:0,wnd_extra:0,instance,icon:0,cursor:LoadCursorW(0,32512usize as *const u16),background:0,menu:ptr::null(),class:name.as_ptr(),small_icon:0};RegisterClassExW(&class);
+        let mut area=Rect{left:0,top:0,right:1024,bottom:768};SystemParametersInfoW(0x30,0,(&mut area as *mut Rect).cast(),0);
+        let width=920.min((area.right-area.left).max(640));let height=610.min((area.bottom-area.top).max(480));
+        let owner=GetAncestor(owner,2);let main=owner_root(owner);let activate=is_foreground_window(owner)||is_foreground_window(main);let hwnd=CreateWindowExW(0x1,name.as_ptr(),wide("Update All results").as_ptr(),0x80C80000|0x02000000,area.left+(area.right-area.left-width)/2,area.top+(area.bottom-area.top-height)/2,width,height,owner,0,instance,ptr::null_mut());
+        if hwnd==0{message(owner,summary);return;}
+        let report=CompletionReport{rows:rows.into_iter().take(crate::core::APPS.len()).collect(),font:segoe_font(16),restore_focus:std::cell::Cell::new(false)};if SetPropW(hwnd,wide("CraftLauncher.CompletionData").as_ptr(),(&report as *const CompletionReport)as isize)==0{DestroyWindow(hwnd);DeleteObject(report.font);message(owner,summary);return;}
+        let mut client:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut client);let left=320.min(client.right/2);let body=client.bottom-136;let row_height=(body/crate::core::APPS.len() as i32).min(34);
+        let child=|class:&str,text:&str,style:u32,x:i32,y:i32,width:i32,height:i32,id:i32|{
+            let control=CreateWindowExW(0,wide(class).as_ptr(),wide(text).as_ptr(),0x50000000|style,x,y,width,height,hwnd,id as isize,instance,ptr::null_mut());SendMessageW(control,0x30,report.font as usize,0);plain_control(control);control
+        };
+        child("STATIC",summary,0,18,16,client.right-36,50,10);
+        for (row,(label,_)) in report.rows.iter().enumerate(){child("BUTTON",label,0x10000|0xB,18,78+row as i32*row_height,left-28,row_height-3,100+row as i32);}
+        child("STATIC","Details",0,left+10,78,client.right-left-28,34,20);
+        child("EDIT","",0x10000|0x200000|0x4|0x40|0x800,left+10,116,client.right-left-28,body-38,21);
+        child("BUTTON","OK",0x10000|0xB,client.right-118,client.bottom-48,100,32,1);
+        if report.rows.is_empty(){completion_detail(GetDlgItem(hwnd,21),summary);}else{SendMessageW(hwnd,0x111,100,0);}
+        let enabled=IsWindowEnabled(owner)!=0;EnableWindow(owner,0);theme_window(hwnd);ShowWindow(hwnd,if activate{5}else{4});UpdateWindow(hwnd);if activate{SetFocus(GetDlgItem(hwnd,1));}
+        let mut msg:Msg=std::mem::zeroed();while IsWindow(hwnd)!=0{let result=GetMessageW(&mut msg,0,0,0);if result<=0{if result==0{PostQuitMessage(msg.wparam as i32);}break;}if IsDialogMessageW(hwnd,&msg)==0{TranslateMessage(&msg);DispatchMessageW(&msg);}}
+        if IsWindow(hwnd)!=0{DestroyWindow(hwnd);}if enabled{EnableWindow(owner,1);}if report.restore_focus.get(){activate_window(main);}DeleteObject(report.font);
+    }
+}
+
 /// The property borrows an icon owned by UI State. Remove it before destroying the icon.
 pub fn set_button_icon(hwnd:Hwnd,icon:Handle)->bool {
     if hwnd==0 {return false;}
@@ -207,31 +302,33 @@ pub fn set_button_icon(hwnd:Hwnd,icon:Handle)->bool {
 pub fn segoe_font(pixels:i32)->Handle {unsafe {CreateFontW(-pixels,0,0,0,400,0,0,0,1,0,0,5,0,wide("Segoe UI").as_ptr())}}
 pub fn set_detail_font(hwnd:Hwnd,font:Handle) {if hwnd==0{return;}unsafe {let key=wide("CraftLauncher.DetailFont");RemovePropW(hwnd,key.as_ptr());if font!=0{SetPropW(hwnd,key.as_ptr(),font);}}}
 /// Drawing uses only control-local data, never the reentrant application RefCell.
-pub unsafe fn draw_app_tile(item:&DrawItem) {if !glass::draw(item,0){draw_app_tile_content(item);}}
+pub unsafe fn draw_app_tile(item:&DrawItem) {
+    let saved=SaveDC(item.dc);if saved==0{return;}
+    let r=item.rect;let region=CreateEllipticRgn(r.left,r.top,r.right,r.bottom);
+    if region!=0{ExtSelectClipRgn(item.dc,region,1);DeleteObject(region);if !glass::draw(item,0){draw_app_tile_content(item);}}
+    RestoreDC(item.dc,saved);
+}
 unsafe fn draw_app_tile_content(item:&DrawItem) {
     let saved=SaveDC(item.dc);if saved==0{return;}
     let pressed=item.state&1!=0||button_flag(item.hwnd,"CraftLauncher.Click");let disabled=item.state&4!=0;let hot=!disabled&&button_flag(item.hwnd,"CraftLauncher.Hover");let p=palette();
-    SetDCBrushColor(item.dc,p.background);FillRect(item.dc,&item.rect,GetStockObject(18));
-    let pen=CreatePen(0,if hot||pressed{3}else{1},if hot||pressed||item.state&0x10!=0 {p.focus}else{p.border});
-    SelectObject(item.dc,pen);SetDCBrushColor(item.dc,if pressed{p.pressed}else{p.surface});SelectObject(item.dc,GetStockObject(18));
-    RoundRect(item.dc,item.rect.left,item.rect.top,item.rect.right,item.rect.bottom,8,8);
-
-    let height=item.rect.bottom-item.rect.top;let width=item.rect.right-item.rect.left;
-    let icon_size=88.min((height-76).max(40));
-    let top=item.rect.top+((height-icon_size-56)/2).max(8)+i32::from(pressed);
+    // Fill the clipped circle, then keep the centered pen safely inside its mask.
+    SetDCBrushColor(item.dc,if pressed{p.pressed}else{p.surface});FillRect(item.dc,&item.rect,GetStockObject(18));
+    let emphasis=hot||pressed;let inset=if emphasis{2}else{1};
+    let pen=CreatePen(0,if emphasis{3}else{1},if emphasis||item.state&0x10!=0 {p.focus}else{p.border});
+    SelectObject(item.dc,pen);SelectObject(item.dc,GetStockObject(5));
+    Ellipse(item.dc,item.rect.left+inset,item.rect.top+inset,item.rect.right-inset,item.rect.bottom-inset);
+    let width=item.rect.right-item.rect.left;
+    let(icon_size,top,mut name_rect,mut version_rect,name_size,detail_size)=circle_content(item.rect,pressed);
     let icon=GetPropW(item.hwnd,wide("CraftLauncher.ButtonIcon").as_ptr());
     if icon!=0 {DrawIconEx(item.dc,item.rect.left+(width-icon_size)/2,top,icon,icon_size,icon_size,0,0,3);}
     let label=text(item.hwnd);let mut parts=label.splitn(2,'\n');let name=parts.next().unwrap_or("");let version=parts.next().unwrap_or("");
-    let font=SendMessageW(item.hwnd,0x31,0,0);SelectObject(item.dc,if font!=0 {font}else{GetStockObject(17)});
-    SetBkMode(item.dc,1);SetTextColor(item.dc,if disabled{p.muted}else{p.text});
-    let mut name_rect=Rect{left:item.rect.left+8,top:top+icon_size+7,right:item.rect.right-8,bottom:top+icon_size+34};
-    DrawTextW(item.dc,wide(name).as_ptr(),-1,&mut name_rect,0x1|0x4|0x20|0x8000|0x800);
-    let detail_font=GetPropW(item.hwnd,wide("CraftLauncher.DetailFont").as_ptr());if detail_font!=0{SelectObject(item.dc,detail_font);}
-    SetTextColor(item.dc,p.muted);
-    let mut version_rect=Rect{left:item.rect.left+8,top:name_rect.bottom,right:item.rect.right-8,bottom:name_rect.bottom+22};
+    let name_font=segoe_font(name_size);let detail_font=segoe_font(detail_size);
+    SelectObject(item.dc,name_font);SetBkMode(item.dc,1);SetTextColor(item.dc,if disabled{p.muted}else{p.text});
+    DrawTextW(item.dc,wide(name).as_ptr(),-1,&mut name_rect,0x1|0x4|0x20|0x8000);
+    SelectObject(item.dc,detail_font);SetTextColor(item.dc,p.muted);
     DrawTextW(item.dc,wide(version).as_ptr(),-1,&mut version_rect,0x1|0x4|0x20|0x8000|0x800);
-    if item.state&0x10!=0 && item.state&0x200==0 {let focus=Rect{left:item.rect.left+4,top:item.rect.top+4,right:item.rect.right-4,bottom:item.rect.bottom-4};DrawFocusRect(item.dc,&focus);}
-    RestoreDC(item.dc,saved);DeleteObject(pen);
+    if item.state&0x10!=0 && item.state&0x200==0{SelectObject(item.dc,GetStockObject(5));Ellipse(item.dc,4,4,width-4,width-4);}
+    RestoreDC(item.dc,saved);DeleteObject(name_font);DeleteObject(detail_font);DeleteObject(pen);
 }
 #[repr(C)] struct Margins {left:i32,right:i32,top:i32,bottom:i32}
 #[link(name="dwmapi")] extern "system" {
@@ -450,9 +547,12 @@ pub fn click_feedback(hwnd:Hwnd) {unsafe {
 }}
 unsafe extern "system" fn tile_subclass(hwnd:Hwnd,msg:u32,w:usize,l:isize,_id:usize,_data:usize)->Lresult {
     match msg {
+        0x14=>return 1, // Ownerdraw fills only the circle; no rectangular erase.
+        0x87=>{return DefSubclassProc(hwnd,msg,w,l)|1;}, // DLGC_WANTARROWS; Tab remains native dialog navigation.
+        0x100 if (37..=40).contains(&w)=>{let parent=GetAncestor(hwnd,1);let mut r:Rect=std::mem::zeroed();GetClientRect(parent,&mut r);let bounds=circles::bounds(r.right,r.bottom);let index=(GetDlgCtrlID(hwnd)-300)as usize;if index<bounds.len(){let a=bounds[index];let mut best=None;for(i,b)in bounds.iter().enumerate(){if i==index{continue;}let dx=(b.left+b.right-a.left-a.right)as f64;let dy=(b.top+b.bottom-a.top-a.bottom)as f64;let (along,cross)=match w{37=>(-dx,dy),38=>(-dy,dx),39=>(dx,dy),_=>(dy,dx)};if along>0.{let score=along+cross.abs()*3.;if best.map(|(_,v)|score<v).unwrap_or(true){best=Some((i,score));}}}if let Some((i,_))=best{SetFocus(GetDlgItem(parent,300+i as i32));}}return 0;},
+        0x202=>{let mut rect:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut rect);let x=(l as u32&65535)as i16 as i32;let y=((l as u32>>16)&65535)as i16 as i32;if !circles::contains(rect.right,rect.bottom,x,y){SendMessageW(hwnd,0xF3,0,0);ReleaseCapture();return 0;}if SendMessageW(hwnd,0xF2,0,0)&4!=0{click_feedback(hwnd);}},
         0x200=>{if !button_flag(hwnd,"CraftLauncher.Hover"){let mut track=TrackMouse{size:std::mem::size_of::<TrackMouse>()as u32,flags:2,hwnd,hover_time:0};if TrackMouseEvent(&mut track)!=0{SetPropW(hwnd,wide("CraftLauncher.Hover").as_ptr(),1);InvalidateRect(hwnd,ptr::null(),0);}}},
         0x2A3=>{RemovePropW(hwnd,wide("CraftLauncher.Hover").as_ptr());InvalidateRect(hwnd,ptr::null(),0);},
-        0x202=>{let mut rect:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut rect);let x=(l as u32&65535)as i16 as i32;let y=((l as u32>>16)&65535)as i16 as i32;if SendMessageW(hwnd,0xF2,0,0)&4!=0 && x>=0&&x<rect.right&&y>=0&&y<rect.bottom{click_feedback(hwnd);}},
         0x101 if w==32=>click_feedback(hwnd),0xF5=>click_feedback(hwnd),
         0x113 if w==FEEDBACK_TIMER=>{KillTimer(hwnd,FEEDBACK_TIMER);RemovePropW(hwnd,wide("CraftLauncher.Click").as_ptr());if IsWindowVisible(hwnd)!=0&&IsIconic(GetAncestor(hwnd,2))==0{InvalidateRect(hwnd,ptr::null(),0);}return 0;},
         0x1F=>clear_feedback(hwnd),
@@ -528,6 +628,20 @@ pub fn clear_settings_page(hwnd:Hwnd){
     unsafe extern "system" fn collect(child:Hwnd,data:isize)->i32 {(&mut*(data as *mut Vec<Hwnd>)).push(child);1}
     unsafe {let mut children=Vec::<Hwnd>::new();EnumChildWindows(hwnd,Some(collect),(&mut children as *mut Vec<Hwnd>)as isize);for child in children{DestroyWindow(child);}}
 }
+/// Commit final child geometry before painting. Discard copied pixels, then queue
+/// one complete repaint including children excluded by WS_CLIPCHILDREN.
+pub fn layout_controls(hwnd:Hwnd,moves:&[(Hwnd,Rect)]){
+    if hwnd==0{return;}
+    unsafe {
+        const FLAGS:u32=0x4|0x10|0x8|0x100; // NOZORDER | NOACTIVATE | NOREDRAW | NOCOPYBITS
+        let mut batch=BeginDeferWindowPos(moves.len()as i32);
+        // WM_SIZE can arrive during parent creation, before its controls exist.
+        for (child,r) in moves {if *child==0{continue;}if batch==0{break;}batch=DeferWindowPos(batch,*child,0,r.left,r.top,r.right-r.left,r.bottom-r.top,FLAGS);}
+        let committed=batch!=0 && EndDeferWindowPos(batch)!=0;
+        if !committed {for (child,r) in moves {if *child!=0{SetWindowPos(*child,0,r.left,r.top,r.right-r.left,r.bottom-r.top,FLAGS);}}}
+        RedrawWindow(hwnd,ptr::null(),0,0x1|0x4|0x80|0x400); // INVALIDATE | ERASE | ALLCHILDREN | FRAME; queued, no UPDATENOW
+    }
+}
 pub fn layout_settings(hwnd:Hwnd){
     if hwnd==0{return;}
     struct Layout {width:i32,height:i32,moves:Vec<(Hwnd,Rect)>}
@@ -543,13 +657,7 @@ pub fn layout_settings(hwnd:Hwnd){
         for (child,_) in &layout.moves {if GetPropW(*child,wide("CraftLauncher.BackgroundCard").as_ptr())!=0{SetWindowPos(*child,1,0,0,0,0,0x1|0x2|0x10|0x8);}} // HWND_BOTTOM; NOSIZE | NOMOVE | NOACTIVATE | NOREDRAW
         // Preserve the corrected z-order/focus; neither copy old pixels nor paint halfway through
         // a resize. Each fixed page fits a 1000 x 680 client; there is no shared scroll offset.
-        const FLAGS:u32=0x4|0x10|0x8|0x100; // NOZORDER | NOACTIVATE | NOREDRAW | NOCOPYBITS
-        let mut batch=BeginDeferWindowPos(layout.moves.len()as i32);
-        for (child,r) in &layout.moves {if batch==0{break;}batch=DeferWindowPos(batch,*child,0,r.left,r.top,r.right-r.left,r.bottom-r.top,FLAGS);}
-        let committed=batch!=0 && EndDeferWindowPos(batch)!=0;
-        if !committed {for (child,r) in &layout.moves {SetWindowPos(*child,0,r.left,r.top,r.right-r.left,r.bottom-r.top,FLAGS);}}
-        // Parent has WS_CLIPCHILDREN: invalidating it alone leaves child pixels stale.
-        RedrawWindow(hwnd,ptr::null(),0,0x1|0x4|0x80|0x400); // INVALIDATE | ERASE | ALLCHILDREN | FRAME
+        layout_controls(hwnd,&layout.moves);
     }
 }
 pub unsafe fn draw_settings_static(item:&DrawItem) {if !glass::draw(item,2){draw_settings_static_content(item);}}
@@ -651,4 +759,54 @@ pub fn init_progress_controls(){
 pub fn progress_bar(hwnd:Hwnd,position:Option<u16>,indeterminate:bool,failed:bool)->bool{
     if hwnd==0{return false;}let code=if indeterminate{2002}else{position.unwrap_or(0).min(1000)as isize+1}+if failed{4000}else{0};
     unsafe{let key=wide("CraftLauncher.ProgressState");let before=GetPropW(hwnd,key.as_ptr());if before==code{return false;}SetPropW(hwnd,key.as_ptr(),code);let style=GetWindowLongPtrW(hwnd,-16);if !indeterminate{SendMessageW(hwnd,0x40A,0,0);}SetWindowLongPtrW(hwnd,-16,if indeterminate{style|8}else{style&!8});if before==0{SendMessageW(hwnd,0x406,0,1000);}if indeterminate{SendMessageW(hwnd,0x40A,1,40);}SendMessageW(hwnd,0x410,if failed{2}else{1},0);if !indeterminate{SendMessageW(hwnd,0x402,position.unwrap_or(0).min(1000)as usize,0);}}true
+}
+#[path="circles.rs"] pub mod circles;
+#[repr(C)] struct PaintStruct{dc:Handle,erase:i32,rect:Rect,restore:i32,inc_update:i32,reserved:[u8;32]}
+#[link(name="user32")] extern "system"{fn BeginPaint(hwnd:Hwnd,paint:*mut PaintStruct)->Handle;fn EndPaint(hwnd:Hwnd,paint:*const PaintStruct)->i32;fn SetWindowRgn(hwnd:Hwnd,region:Handle,redraw:i32)->i32;fn ReleaseCapture()->i32;}
+#[link(name="gdi32")] extern "system"{fn CreateEllipticRgn(left:i32,top:i32,right:i32,bottom:i32)->Handle;fn Ellipse(dc:Handle,left:i32,top:i32,right:i32,bottom:i32)->i32;fn MoveToEx(dc:Handle,x:i32,y:i32,old:*mut Point)->i32;fn LineTo(dc:Handle,x:i32,y:i32)->i32;}
+thread_local!{static LAUNCHER_CONTEXT:std::cell::RefCell<(String,String)>=const{std::cell::RefCell::new((String::new(),String::new()))};}
+// Presentation only: preserve canonical filesystem paths in application state.
+fn friendly_root(root:&str)->String{if let Some(rest)=root.strip_prefix(r"\\?\UNC\"){format!(r"\\{}",rest)}else{root.strip_prefix(r"\\?\").unwrap_or(root).to_owned()}}
+pub fn launcher_context(hwnd:Hwnd,root:&str,profile:&str){let display=friendly_root(root);let root=display.as_str();LAUNCHER_CONTEXT.with(|v|{let mut v=v.borrow_mut();if v.0!=root||v.1!=profile{*v=(root.into(),profile.into());unsafe{InvalidateRect(hwnd,ptr::null(),1);}}});}
+pub fn circle_region(hwnd:Hwnd){if hwnd==0{return;}unsafe{let mut r:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut r);let region=CreateEllipticRgn(0,0,r.right,r.bottom);if region!=0&&SetWindowRgn(hwnd,region,0)==0{DeleteObject(region);}}}
+// Shared geometry for opaque GDI and premultiplied glass text/icon layers.
+fn circle_content(r:Rect,pressed:bool)->(i32,i32,Rect,Rect,i32,i32){let d=r.right-r.left;let size=(d*32/96).clamp(24,42);let top=r.top+d*16/96+i32::from(pressed);let name_top=r.top+d*52/96;let name_h=d*17/96;let version_top=name_top+name_h;let inset=d*10/96;
+(size,top,Rect{left:r.left+inset,top:name_top,right:r.right-inset,bottom:version_top},Rect{left:r.left+d/6,top:version_top,right:r.right-d/6,bottom:version_top+d*13/96},(d*12/96).max(11),(d*10/96).max(9))}
+pub unsafe fn paint_launcher(hwnd:Hwnd){
+    let mut ps:PaintStruct=std::mem::zeroed();let dc=BeginPaint(hwnd,&mut ps);if dc==0{EndPaint(hwnd,&ps);return;}
+    let mut r:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut r);
+    let saved=SaveDC(dc);if saved==0{EndPaint(hwnd,&ps);return;}clip_launcher_children(hwnd,dc);
+    if button_flag(hwnd,"CraftLauncher.Backdrop"){if !glass::foreground(dc,&r,|target|paint_launcher_content(target,r)){reset_backdrop(hwnd);InvalidateRect(hwnd,ptr::null(),1);}}else{paint_launcher_content(dc,r);}
+    RestoreDC(dc,saved);EndPaint(hwnd,&ps);
+}
+unsafe fn paint_launcher_content(dc:Handle,r:Rect){let saved=SaveDC(dc);if saved==0{return;}let(w,h)=(r.right,r.bottom);let p=palette();
+    let pen=CreatePen(0,1,p.border);SelectObject(dc,pen);
+    for(a,b)in circles::EDGES{let(a,b)=circles::edge(w,h,a,b);MoveToEx(dc,a.0,a.1,ptr::null_mut());LineTo(dc,b.0,b.1);}
+    MoveToEx(dc,24,65,ptr::null_mut());LineTo(dc,w-24,65);
+    SetBkMode(dc,1);let title_font=segoe_font(22);let small_font=segoe_font(12);let label_font=segoe_font(10);
+    let draw=|text:&str,mut rect:Rect,font:Handle,color:u32,flags:u32|{SelectObject(dc,font);SetTextColor(dc,color);DrawTextW(dc,wide(text).as_ptr(),-1,&mut rect,0x20|0x800|flags);};
+    let icon=launcher_icon(GetModuleHandleW(ptr::null()),false);if icon!=0{DrawIconEx(dc,24,21,icon,32,32,0,0,3);}
+    draw("Craft App Launcher",Rect{left:68,top:19,right:w-180,bottom:52},title_font,p.text,0);
+    LAUNCHER_CONTEXT.with(|v|{let v=v.borrow();draw(&v.0,Rect{left:26,top:78,right:w-240,bottom:98},small_font,p.muted,0);draw(&v.1,Rect{left:w-230,top:78,right:w-26,bottom:98},small_font,p.muted,2);});
+    for(text,x,y)in[("DOCUMENTS",37.,116.),("VISUAL TOOLS",355.,116.),("MOTION + AUDIO",605.,226.)]{let(x,y)=circles::point(w,h,x,y);draw(text,Rect{left:x,top:y,right:x+170,bottom:y+18},label_font,p.muted,0);}
+    RestoreDC(dc,saved);for object in[pen,title_font,small_font,label_font]{DeleteObject(object);}
+}
+
+#[link(name="user32")] extern "system"{fn MapWindowPoints(from:Hwnd,to:Hwnd,points:*mut Point,count:u32)->i32;}
+#[link(name="gdi32")] extern "system"{fn ExtSelectClipRgn(dc:Handle,region:Handle,mode:i32)->i32;fn ExcludeClipRect(dc:Handle,left:i32,top:i32,right:i32,bottom:i32)->i32;}
+// WS_CLIPCHILDREN excludes rectangular button bounds on this ownerdraw path.
+// Explicit subtraction preserves connector segments in the circle corners, while
+// keeping parent erasure and glass compositing away from native child surfaces.
+unsafe fn clip_launcher_children(hwnd:Hwnd,dc:Handle){
+    for id in [100,110,111].into_iter().chain(300..300+crate::core::APPS.len()as i32){
+        let child=GetDlgItem(hwnd,id);if child==0||IsWindowVisible(child)==0{continue;}
+        let mut r:Rect=std::mem::zeroed();if GetWindowRect(child,&mut r)==0{continue;}
+        MapWindowPoints(0,hwnd,(&mut r as *mut Rect).cast(),2);
+        if id>=300{let region=CreateEllipticRgn(r.left,r.top,r.right,r.bottom);if region!=0{ExtSelectClipRgn(dc,region,4);DeleteObject(region);}}
+        else{ExcludeClipRect(dc,r.left,r.top,r.right,r.bottom);}
+    }
+}
+pub unsafe fn erase_launcher_background(hwnd:Hwnd,dc:Handle)->Lresult{
+    let saved=SaveDC(dc);if saved==0{return 1;}clip_launcher_children(hwnd,dc);
+    let result=erase_background(hwnd,dc);RestoreDC(dc,saved);result
 }

@@ -1,5 +1,19 @@
 # Release notes
 
+## v0.2.0
+
+- Introduces thirteen circular app nodes across document, visual, and motion/audio groups, with installed app icons, versions, connecting lines, and responsive layout.
+- Adds FigCraft discovery and launch support, an original launcher icon, and clearer root/profile presentation.
+- Improves update progress, preferred-version handling, and completion reporting while preserving existing installations and concurrent user choices.
+
+Ship the GUI, console agent, and pair manifest together. Personal settings and runtime state are not included in the portable package.
+
+### Verification and limits
+
+The accepted functional candidate passed 82 automated tests plus a separately exercised native completion regression. Private-desktop UI checks covered all 13 nodes at wide and compact sizes, a ten-step resize sweep, minimize/restore, idle behavior, and icon resources. The Settings switch and Done action were accepted by the user. Version 0.2.0 is rebuilt from that functional source with release metadata changes; its binary hashes differ from the accepted pre-release candidate. The fresh 0.2.0 build also passed all 82 automated tests and the separate native completion regression on a unique private desktop (83 checks total).
+
+Fresh Aetherglass, taskbar, and global-focus behavior remain unverified. Broad accessibility/DPI and live bulk-download coverage remain incomplete. See the earlier release limits below and [circular layout notes](docs/circular-launcher.md).
+
 ## v0.1.0
 
 First release of the portable native Windows x64 Craft App Launcher.

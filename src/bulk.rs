@@ -11,10 +11,33 @@ pub struct Progress {pub status:String,pub completed:usize,pub total:usize,pub r
 impl Default for Progress {fn default()->Self{Self{status:"preparing".into(),completed:0,total:0,rows:Vec::new(),stop_reason:None}}}
 impl Progress {
     pub fn summary(&self)->String {
-        let installed=self.rows.iter().filter(|r|r.status=="installed").count();let failed=self.rows.iter().filter(|r|r.status=="failed").count();let skipped=self.rows.iter().filter(|r|r.status=="skipped").count();
-        format!("Update All {}: {}/{} processed; {} installed, {} failed, {} skipped{}",self.status,self.completed,self.total,installed,failed,skipped,self.stop_reason.as_ref().map(|r|format!(". {r}")).unwrap_or_default())
+        let installed=self.rows.iter().filter(|r|r.status=="installed").count();let failed=self.rows.iter().filter(|r|r.status=="failed").count();let skipped=self.rows.iter().filter(|r|r.status=="skipped").count();let not_attempted=self.rows.iter().filter(|r|r.status=="not_attempted").count();
+        format!("Update All {}: {}/{} processed; {} installed, {} failed, {} skipped, {} not attempted{}",self.status,self.completed,self.total,installed,failed,skipped,not_attempted,self.stop_reason.as_ref().map(|r|format!(". {r}")).unwrap_or_default())
     }
-    pub fn details(&self)->String {format!("{}\r\n{}",self.summary(),self.rows.iter().map(|r|format!("{}: {} — {}",r.app,r.status,r.message)).collect::<Vec<_>>().join("\r\n"))}
+    pub fn details(&self)->String {format!("{}\r\n{}",self.summary(),self.rows.iter().map(|r|format!("{}: {}\r\n{}",r.app,report_status(&r.status,&r.message),report_message(&r.status,&r.message))).collect::<Vec<_>>().join("\r\n\r\n"))}
+}
+// Presentation only: retain the complete installation JSON in Row.message for API clients.
+pub fn report_status(status:&str,message:&str)->String {
+    let label=match status {"installed"=>"Installed","failed"=>"Failed","skipped"=>"Skipped","not_attempted"=>"Not attempted",other=>other};
+    let warning=serde_json::from_str::<Value>(message).ok().is_some_and(|v|["cleanup_warning","selection_warning"].iter().any(|key|v[*key].as_str().is_some_and(|s|!s.is_empty())));
+    format!("{label}{}",if warning{" (warning)"}else{""})
+}
+pub fn report_message(status:&str,message:&str)->String {
+    if status!="installed" {return message.into();}
+    let Ok(value)=serde_json::from_str::<Value>(message) else{return message.into();};
+    let mut lines=vec!["Installation completed.".to_owned()];
+    for (key,label) in [("version","Release version"),("folder","Installed folder")] {if let Some(text)=value[key].as_str(){lines.push(format!("{label}: {text}"));}}
+    if let Some(preferred)=value["preferred"].as_bool(){lines.push(if preferred{"Preferred version: selected"}else{"Preferred version: unchanged"}.into());}
+    for (key,label) in [("selection_warning","Preference warning"),("cleanup_warning","Cleanup warning")] {if let Some(text)=value[key].as_str().filter(|s|!s.is_empty()){lines.push(format!("{label}: {text}"));}}
+    lines.join("\r\n\r\n")
+}
+pub fn completion_rows(value:&Value)->Vec<(String,String)> {
+    value["bulk"]["rows"].as_array().map(|rows|rows.iter().map(|row|{
+        let app=row["app"].as_str().unwrap_or("Unknown app");let name=APPS.iter().find(|(id,_)|*id==app).map(|(_,name)|*name).unwrap_or(app);
+        let status=row["status"].as_str().unwrap_or("Unknown");let message=row["message"].as_str().unwrap_or("");
+        let mut detail=report_message(status,message);if status=="not_attempted"{if let Some(reason)=value["bulk"]["stop_reason"].as_str(){detail.push_str(&format!("\r\n\r\nStop reason: {reason}"));}}
+        (format!("{name} - {}",report_status(status,message)),detail)
+    }).collect()).unwrap_or_default()
 }
 pub fn snapshot(progress:&Mutex<Progress>)->Progress{progress.lock().unwrap_or_else(|p|p.into_inner()).clone()}
 pub fn snapshot_live(shared:&Mutex<Progress>,transfer:&WorkProgress)->Progress{
@@ -56,7 +79,7 @@ where F:FnMut(usize)->Result<updates::Release,String>,G:FnMut(usize,&updates::Re
                 Ok(())=>{
                     p.rows[row].status="downloading".into();p.rows[row].message=format!("{}; downloading verified portable archive",release.tag);bytes.begin(app,Phase::Downloading,Some(release.assets[0].size),&p.rows[row].message);publish(shared,&p);
                     match install(app,&release){
-                        Ok(value)=>{bytes.phase(Phase::Installed,"Installed");p.rows[row].status="installed".into();p.rows[row].message=value.to_string();},
+                        Ok(mut value)=>{if let Some(object)=value.as_object_mut(){object.insert("version".into(),json!(release.tag));}bytes.phase(Phase::Installed,"Installed");p.rows[row].status="installed".into();p.rows[row].message=value.to_string();},
                         Err(e)=>{bytes.phase(Phase::Failed,&e);p.rows[row].status="failed".into();p.rows[row].message=e;},
                     }
                 }
@@ -90,6 +113,13 @@ pub fn run(base:&Path,config:&Config,cancel:&AtomicBool,bytes:&WorkProgress,shar
     use super::*;
     fn release(app:usize)->updates::Release {let id=APPS[app].0;let name=format!("{id}-1.2.3-windows-x64-portable.zip");updates::parse_release_for(app,&serde_json::to_vec(&json!({"tag_name":"v1.2.3","draft":false,"prerelease":false,"assets":[{"name":name,"browser_download_url":format!("https://github.com/storytold/{id}/releases/download/v1.2.3/{name}"),"size":123,"digest":format!("sha256:{}","a".repeat(64))}]})).unwrap()).unwrap()}
     fn install(app:usize,version:&str)->Install{Install{app,gui:None,cli:None,folder:std::path::PathBuf::from(format!("fixture-{app}")),version:version.into()}}
+    #[test] fn completion_report_preserves_warnings_long_paths_and_all_outcomes(){
+        let path=format!("E:/apps/{}/filmcraft", "long-folder/".repeat(60));
+        let payload=json!({"version":"v1.2.3","folder":path,"preferred":false,"selection_warning":"Preference changed during installation","cleanup_warning":"Retained staging for inspection","progress":{"downloaded_bytes":123}}).to_string();
+        let readable=report_message("installed",&payload);assert!(readable.contains(&path));assert!(readable.contains("Release version: v1.2.3"));assert!(readable.contains("Preferred version: unchanged"));assert!(readable.contains("Preference warning: Preference changed"));assert!(readable.contains("Cleanup warning: Retained staging"));assert!(!readable.contains("downloaded_bytes"));assert!(!readable.contains('{'));assert_eq!(report_status("installed",&payload),"Installed (warning)");
+        let value=json!({"bulk":{"rows":[{"app":"cadcraft","status":"installed","message":payload},{"app":"deckcraft","status":"failed","message":"Verification failed"},{"app":"designcraft","status":"skipped","message":"Already current"},{"app":"effectcraft","status":"not_attempted","message":"Cancellation requested"}]}});
+        let rows=completion_rows(&value);assert_eq!(rows.len(),4);assert!(rows[1].0.contains("Failed"));assert_eq!(rows[1].1,"Verification failed");assert!(rows[2].0.contains("Skipped"));assert!(rows[3].0.contains("Not attempted"));assert_eq!(rows[3].1,"Cancellation requested");assert!(value["bulk"]["rows"][0]["message"].as_str().unwrap().contains("downloaded_bytes"));
+    }
     #[test] fn selection_ignores_preference_and_skips_unknown_current_ahead_and_assets(){
         let r=release(0);let older=install(0,"1.0.0.0 [PE file version]");assert!(eligible(0,&[older.clone()],&r).is_ok());assert!(eligible(0,&[],&r).is_err());
         for version in ["1.2.3.0 [PE file version]","2.0.0.0 [PE file version]","Unknown; folder hint 1.0.0","1.0.0.1 [PE file version]"]{assert!(eligible(0,&[older.clone(),install(0,version)],&r).is_err());}

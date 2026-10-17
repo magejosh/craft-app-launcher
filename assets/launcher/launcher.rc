@@ -1,0 +1,2 @@
+// Keep resource 101 aligned with launcher_icon() in src/native.rs.
+101 ICON "assets/launcher/craft-app-launcher.ico"

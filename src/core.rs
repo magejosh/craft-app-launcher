@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, ffi::{OsStr, OsString}, fs, io::{self, Write}, os::windows::{ffi::{OsStrExt, OsStringExt}, fs::MetadataExt, process::CommandExt}, path::{Component, Path, PathBuf}, process::Command, time::{SystemTime, UNIX_EPOCH}};
 use crate::native;
 
-pub const APPS: [(&str, &str); 12] = [("cadcraft","CADCraft"),("deckcraft","DeckCraft"),("designcraft","DesignCraft"),("effectcraft","EffectCraft"),("filmcraft","FilmCraft"),("gridcraft","GridCraft"),("lightcraft","LightCraft"),("pdfcraft","PDFCraft"),("photocraft","PhotoCraft"),("soundcraft","SoundCraft"),("vectorcraft","VectorCraft"),("wordcraft","WordCraft")];
+pub const APPS: [(&str, &str); 13] = [("cadcraft","CADCraft"),("deckcraft","DeckCraft"),("designcraft","DesignCraft"),("effectcraft","EffectCraft"),("filmcraft","FilmCraft"),("gridcraft","GridCraft"),("lightcraft","LightCraft"),("pdfcraft","PDFCraft"),("photocraft","PhotoCraft"),("soundcraft","SoundCraft"),("vectorcraft","VectorCraft"),("wordcraft","WordCraft"),("figcraft","FigCraft")];
 const MAX_DEPTH: usize = 4;
 const MAX_ENTRIES: usize = 20_000;
 const REPARSE: u32 = 0x400;
@@ -368,6 +368,21 @@ fn launch_with_io(base:&Path,root:&Path,install:&Install,cli:bool,args:&[OsStrin
     }
     #[test] fn path_exclusion_is_exact() {
         assert_eq!(filtered_path(OsStr::new(r"E:\Obsidian;E:\Obsidian-backup;C:\Windows"),Path::new(r"e:\obsidian")).unwrap(),OsString::from(r"E:\Obsidian-backup;C:\Windows"));
+    }
+    #[test] fn figcraft_discovery_and_settings_preserve_existing_apps() {
+        assert_eq!(APPS.len(),13);assert_eq!(APPS[4],("filmcraft","FilmCraft"));
+        let app=APPS.iter().position(|(id,_)|*id=="figcraft").unwrap();assert_eq!(APPS[app].1,"FigCraft");
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/temp").join(format!("figcraft-discovery-{}",native::random_id().unwrap()));
+        fs::create_dir_all(&root).unwrap();let folder=root.join("figcraft-0.6.0-windows-x64-portable");fs::create_dir(&folder).unwrap();
+        for name in ["FigCraft.EXE","figcraft-cli.exe","figcraft-server.exe"]{fs::write(folder.join(name),b"not executable: discovery must never run this").unwrap();}
+        let (found,warnings)=discover(&root).unwrap();assert!(warnings.is_empty());assert_eq!(found.len(),1);assert_eq!(found[0].app,app);assert!(found[0].gui.is_some()&&found[0].cli.is_some());assert_eq!(found[0].version,"Unknown; folder hint 0.6.0");
+        assert!(validate_executable(&root,&folder.join("FigCraft.EXE"),app,false).is_ok());assert!(validate_executable(&root,&folder.join("figcraft-cli.exe"),app,true).is_ok());assert!(validate_executable(&root,&folder.join("figcraft-server.exe"),app,false).is_err());
+        fs::remove_file(folder.join("FigCraft.EXE")).unwrap();let (cli,_)=discover(&root).unwrap();assert!(cli[0].gui.is_none()&&cli[0].cli.is_some());assert_eq!(cli[0].version,"Unknown; folder hint 0.6.0");
+        let mut config=Config::default();config.theme=ThemeMode::TrueDark;config.root=Some(PathBuf::from("../apps"));
+        for (id,_) in APPS{config.arguments.insert(id.into(),format!("--{id}"));config.selections.insert(id.into(),PathBuf::from(format!("{id}-saved")));}
+        let device=config.create_device("Travel").unwrap();config.set_device_arguments(&device,"figcraft","--safe".into());
+        let serialized=config.serialize();assert_eq!(Config::parse(&serialized).unwrap().serialize(),serialized);
+        assert_eq!(checked_path(&root).unwrap().parent(),Some(checked_path(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/temp")).unwrap().as_path()));fs::remove_dir_all(root).unwrap();
     }
     #[test] fn discovery_and_containment() {
         let test = std::env::temp_dir().join(format!("craft-launcher-test-{}",std::process::id()));

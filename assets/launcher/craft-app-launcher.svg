@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<title>Craft App Launcher — Prism Orbit</title>
+<desc>An original luminous glass core and three colorful satellites on a circular workflow.</desc>
+<defs>
+<radialGradient id="core" cx="35%" cy="25%" r="80%"><stop stop-color="#e3ffff"/><stop offset=".43" stop-color="#459fe4"/><stop offset="1" stop-color="#243b92"/></radialGradient>
+<radialGradient id="cyan" cx="35%" cy="25%" r="80%"><stop stop-color="#e4ffff"/><stop offset=".43" stop-color="#37deda"/><stop offset="1" stop-color="#087a9f"/></radialGradient>
+<radialGradient id="coral" cx="35%" cy="25%" r="80%"><stop stop-color="#fff0c2"/><stop offset=".43" stop-color="#ff9361"/><stop offset="1" stop-color="#bd365d"/></radialGradient>
+<radialGradient id="violet" cx="35%" cy="25%" r="80%"><stop stop-color="#f4dbff"/><stop offset=".43" stop-color="#b987ff"/><stop offset="1" stop-color="#6137b1"/></radialGradient>
+</defs>
+<g fill="none" stroke-linecap="round">
+<circle cx="256" cy="256" r="174" stroke="#172a49" stroke-width="19"/>
+<circle cx="256" cy="256" r="174" stroke="#53a9bf" stroke-width="5"/>
+</g>
+<circle cx="256" cy="256" r="127" fill="#101d39"/>
+<circle cx="256" cy="252" r="117" fill="url(#core)"/>
+<polygon points="157,193 251,140 320,193 256,273" fill="#ecffff" opacity=".13"/>
+<polygon points="256,273 320,193 365,279 298,356" fill="#503aa8" opacity=".25"/>
+<polygon points="157,193 256,273 298,356 204,348" fill="#11b9d2" opacity=".15"/>
+<path d="M 156 201 A 112 112 0 0 1 291 145" fill="none" stroke="#e6ffff" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+<path d="M 192 199 A 53 53 0 0 1 248 172" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity=".5"/>
+<circle cx="388" cy="142" r="47" fill="#101d39"/>
+<circle cx="388" cy="138" r="39" fill="url(#coral)"/>
+<circle cx="89" cy="210" r="39" fill="#101d39"/>
+<circle cx="89" cy="207" r="32" fill="url(#cyan)"/>
+<circle cx="294" cy="426" r="43" fill="#101d39"/>
+<circle cx="294" cy="423" r="35" fill="url(#violet)"/>
+</svg>

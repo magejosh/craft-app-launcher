@@ -418,7 +418,7 @@ pub fn gui_delta(base:&Path,current:&Config,candidate:&Config,machine:Option<&st
     }
     #[test]fn state_explicitly_reports_catalogue_owner_discovery_and_work(){
         let b=base();let view=View{owner:"gui",discovery:Discovery::Scanning,work:json!({"status":"running","request_id":"fixture"})};
-        let value=state(&b,&Config::default(),None,"missing",&view);assert_eq!(value["known_apps"].as_array().unwrap().len(),12);assert_eq!(value["known_apps"][4]["app_id"],"filmcraft");assert_eq!(value["owner"],"gui");assert_eq!(value["discovery"]["status"],"scanning");assert_eq!(value["work"]["request_id"],"fixture");
+        let value=state(&b,&Config::default(),None,"missing",&view);assert_eq!(value["known_apps"].as_array().unwrap().len(),APPS.len());assert_eq!(value["known_apps"][4]["app_id"],"filmcraft");assert_eq!(value["owner"],"gui");assert_eq!(value["discovery"]["status"],"scanning");assert_eq!(value["work"]["request_id"],"fixture");
     }
 }
 #[cfg(test)] mod null_precondition_regression{

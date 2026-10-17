@@ -63,10 +63,11 @@ fn rounded(x:i32,y:i32,w:i32,h:i32,inset:i32,radius:i32)->bool {
 }
 unsafe fn card(buffer:&Buffer,pressed:bool,emphasis:bool,focus:bool,radius:i32) {
     let p=palette();let w=buffer.width as i32;let h=buffer.height as i32;let edge=if emphasis{3}else{1};
+    let circular=w==h&&radius==w/2;let border_inset=if circular{1}else{0};
     for y in 0..h {for x in 0..w {
         if !rounded(x,y,w,h,0,radius){continue;}
-        let border=!rounded(x,y,w,h,edge,(radius-edge).max(0));
-        let focus_dot=focus && (x+y)%2==0 && rounded(x,y,w,h,4,0) && !rounded(x,y,w,h,5,0);
+        let border=rounded(x,y,w,h,border_inset,(radius-border_inset).max(0)) && !rounded(x,y,w,h,border_inset+edge,(radius-border_inset-edge).max(0));
+        let focus_dot=focus && (x+y)%2==0 && rounded(x,y,w,h,4,(radius-4).max(0)) && !rounded(x,y,w,h,5,(radius-5).max(0));
         *buffer.at(x as usize,y as usize)=if focus_dot||border&&emphasis{pixel(p.focus,255)}else if border{pixel(p.border,255)}else{tint(pressed)};
     }}
 }
@@ -110,18 +111,17 @@ pub(super) unsafe fn draw(item:&DrawItem,kind:u8)->bool {
         let pressed=item.state&1!=0 || kind==0&&button_flag(item.hwnd,"CraftLauncher.Click");
         let focused=item.state&0x10!=0;let cue=focused&&item.state&0x200==0;
         let emphasis=focused||button_flag(item.hwnd,"CraftLauncher.Selected")||kind==0&&!disabled&&(button_flag(item.hwnd,"CraftLauncher.Hover")||pressed);
-        card(&buffer,pressed,emphasis,cue,if kind==0{4}else{3});
+        card(&buffer,pressed,emphasis,cue,if kind==0{(item.rect.right-item.rect.left)/2}else{3});
         let font=SendMessageW(item.hwnd,0x31,0,0);let icon=GetPropW(item.hwnd,wide("CraftLauncher.ButtonIcon").as_ptr());
         let width=item.rect.right-item.rect.left;let height=item.rect.bottom-item.rect.top;
         if kind==0 {
-            let size=88.min((height-76).max(40));let top=item.rect.top+((height-size-56)/2).max(8)+i32::from(pressed);
+            let(size,top,name_rect,version_rect,name_size,detail_size)=circle_content(item.rect,pressed);
             if !icon_layer(&buffer,item,icon,item.rect.left+(width-size)/2,top,size){return None;}
             let label=text(item.hwnd);let mut parts=label.splitn(2,'\n');let name=parts.next().unwrap_or("");let version=parts.next().unwrap_or("");
-            let name_rect=Rect{left:item.rect.left+8,top:top+size+7,right:item.rect.right-8,bottom:top+size+34};
-            if !text_layer(&buffer,item,&theme,font,name,name_rect,if disabled{GLASS_MUTED}else{p.text},0x1|0x4|0x20|0x8000|0x800){return None;}
-            let detail=GetPropW(item.hwnd,wide("CraftLauncher.DetailFont").as_ptr());
-            if !text_layer(&buffer,item,&theme,if detail!=0{detail}else{font},version,Rect{left:item.rect.left+8,top:name_rect.bottom,right:item.rect.right-8,bottom:name_rect.bottom+22},GLASS_MUTED,0x1|0x4|0x20|0x8000|0x800){return None;}
-        }else if kind==1 {
+            let name_font=segoe_font(name_size);let detail_font=segoe_font(detail_size);
+            let name_ok=text_layer(&buffer,item,&theme,name_font,name,name_rect,if disabled{GLASS_MUTED}else{p.text},0x1|0x4|0x20|0x8000);
+            let detail_ok=text_layer(&buffer,item,&theme,detail_font,version,version_rect,GLASS_MUTED,0x1|0x4|0x20|0x8000|0x800);
+            DeleteObject(name_font);DeleteObject(detail_font);if !name_ok||!detail_ok{return None;}        }else if kind==1 {
             let rect=Rect{left:item.rect.left+4,top:item.rect.top,right:item.rect.right-4,bottom:item.rect.bottom};
             if !text_layer(&buffer,item,&theme,font,&text(item.hwnd),rect,if disabled{GLASS_MUTED}else{p.text},0x1|0x4|0x20){return None;}
         }else if !icon_layer(&buffer,item,icon,item.rect.left,item.rect.top,width.min(height)){return None;}
@@ -247,4 +247,11 @@ pub(super) unsafe fn new_control(hwnd:Hwnd) {
         }
         eprintln!("HIDDEN GLASS: EDIT/LISTBOX/COMBOBOX/STATIC/native checkbox constant-alpha255, native text/disabled/checked state and exact reset checked; no input or visible windows");
     }}
+}
+// Parent foreground only. Transparent pixels stay transparent; GDI line/text RGB
+// gets opaque alpha before compositing over the DWM backdrop.
+pub(super) unsafe fn foreground(dc:Handle,rect:&Rect,draw:impl FnOnce(Handle))->bool{
+    let Some(buffer)=Buffer::new(dc,rect)else{return false;};draw(buffer.dc);GdiFlush();
+    for y in 0..buffer.height{for x in 0..buffer.width{let p=&mut*buffer.at(x,y);if p.r!=0||p.g!=0||p.b!=0{p.a=255;}}}
+    buffer.commit()
 }

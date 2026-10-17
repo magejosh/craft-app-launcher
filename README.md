@@ -1,4 +1,4 @@
-# Craft App Launcher v0.1.0
+# Craft App Launcher v0.2.0
 
 A portable, native Windows x64 launcher focused on portable versions of Craft applications in an apps folder you choose. Launch a selected version and install verified portable updates side by side. No fixed drive letter or `reCraft` folder is required.
 
@@ -11,18 +11,19 @@ Windows x64 with the Microsoft Visual C++ v14 x64 runtime. If Windows reports a 
 1. Extract the release into a writable folder, such as `C:\Tools\CraftLauncher`.
 2. Keep `craft-app-launcher.exe`, `craft-launcher-agent.exe`, and `craft-launcher-pair.json` together. These three files are a matched release.
 3. Run `craft-app-launcher.exe` and choose the folder containing your portable Craft installations.
-4. Click an app tile to launch its GUI. If several versions exist, choose one through the tile's context menu or App settings.
+4. Click a circular app node to launch its GUI. If several versions exist, choose one through the node's context menu or App settings.
 
 Settings and logs are saved beside the launcher. You can move the launcher and apps together while preserving their relative layout on the same drive. If a saved root becomes unavailable, choose it again in Settings.
 
 ## Supported apps
 
-The launcher recognizes portable installations of these twelve apps under your selected apps root. Each link opens the app's official repository:
+The launcher recognizes portable installations of these thirteen apps under your selected apps root. Each link opens the app's official repository:
 
 - [CADCraft](https://github.com/storytold/cadcraft)
 - [DeckCraft](https://github.com/storytold/deckcraft)
 - [DesignCraft](https://github.com/storytold/designcraft)
 - [EffectCraft](https://github.com/storytold/effectcraft)
+- [FigCraft](https://github.com/storytold/figcraft)
 - [FilmCraft](https://github.com/storytold/filmcraft)
 - [GridCraft](https://github.com/storytold/gridcraft)
 - [LightCraft](https://github.com/storytold/lightcraft)
@@ -36,6 +37,8 @@ If you prefer the official launcher, see [ArtCraft Launcher](https://github.com/
 
 ## Features
 
+- Thirteen native circular workflow nodes linked across document, visual, and motion/audio clusters. The layout scales with the window; each node displays its installed app icon and version.
+- An original launcher icon in the window chrome and header, with the selected apps root and profile shown below.
 - Exact GUI/CLI executable-name discovery without running apps to identify them; conservative PE file-version reporting and explicit version selection.
 - Named profiles with per-app arguments and per-computer FilmCraft compatibility settings.
 - Three Settings pages: Launcher Settings, Appearance, and Updates.
@@ -52,9 +55,10 @@ The launcher finds, launches, and updates Craft apps. [ArtCraft Skills](https://
 ## Documentation
 
 - [Usage and portable settings](docs/USAGE.md)
+- [Circular layout and input behavior](docs/circular-launcher.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [CLI and MCP integration](docs/AGENT.md)
-- [v0.1.0 release notes and verification limits](RELEASE_NOTES.md)
+- [v0.2.0 release notes and verification limits](RELEASE_NOTES.md)
 
 ## Building from source
 
