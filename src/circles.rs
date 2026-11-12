@@ -1,6 +1,6 @@
 //! Approved circle proposal, expressed in named nodes so APPS ordering remains stable.
 use super::Rect;
-pub const NODES:[(&str,f64,f64);13]=[("gridcraft",100.,190.),("deckcraft",225.,190.),("wordcraft",160.,300.),("designcraft",85.,415.),("pdfcraft",235.,415.),("figcraft",395.,190.),("cadcraft",535.,190.),("vectorcraft",465.,300.),("photocraft",420.,440.),("lightcraft",420.,550.),("effectcraft",655.,300.),("filmcraft",595.,420.),("soundcraft",715.,420.)];
+pub const NODES:[(&str,f64,f64);17]=[("gridcraft",100.,190.),("deckcraft",225.,190.),("wordcraft",160.,300.),("designcraft",85.,415.),("pdfcraft",235.,415.),("figcraft",395.,190.),("cadcraft",535.,190.),("vectorcraft",465.,300.),("photocraft",420.,440.),("lightcraft",420.,550.),("effectcraft",655.,300.),("filmcraft",595.,420.),("soundcraft",715.,420.),("craft-anything",100.,550.),("materialcraft",240.,550.),("anicraft",595.,550.),("texturecraft",715.,550.)];
 pub const EDGES:[(usize,usize);14]=[(0,2),(1,2),(2,3),(2,4),(4,7),(5,7),(6,7),(7,8),(8,9),(10,11),(11,12),(12,10),(7,10),(8,11)];
 pub fn point(w:i32,h:i32,x:f64,y:f64)->(i32,i32){((x*w as f64/800.).round()as i32,(y*h as f64/640.).round()as i32)}
 pub fn bounds(w:i32,h:i32)->Vec<Rect>{

@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, ffi::{OsStr, OsString}, fs, io::{self, Write}, os::windows::{ffi::{OsStrExt, OsStringExt}, fs::MetadataExt, process::CommandExt}, path::{Component, Path, PathBuf}, process::Command, time::{SystemTime, UNIX_EPOCH}};
 use crate::native;
 
-pub const APPS: [(&str, &str); 13] = [("cadcraft","CADCraft"),("deckcraft","DeckCraft"),("designcraft","DesignCraft"),("effectcraft","EffectCraft"),("filmcraft","FilmCraft"),("gridcraft","GridCraft"),("lightcraft","LightCraft"),("pdfcraft","PDFCraft"),("photocraft","PhotoCraft"),("soundcraft","SoundCraft"),("vectorcraft","VectorCraft"),("wordcraft","WordCraft"),("figcraft","FigCraft")];
+pub const APPS: [(&str, &str); 17] = [("cadcraft","CADCraft"),("deckcraft","DeckCraft"),("designcraft","DesignCraft"),("effectcraft","EffectCraft"),("filmcraft","FilmCraft"),("gridcraft","GridCraft"),("lightcraft","LightCraft"),("pdfcraft","PDFCraft"),("photocraft","PhotoCraft"),("soundcraft","SoundCraft"),("vectorcraft","VectorCraft"),("wordcraft","WordCraft"),("figcraft","FigCraft"),("anicraft","AniCraft"),("craft-anything","Craft Anything"),("materialcraft","MaterialCraft"),("texturecraft","TextureCraft")];
 const MAX_DEPTH: usize = 4;
 const MAX_ENTRIES: usize = 20_000;
 const REPARSE: u32 = 0x400;
@@ -370,7 +370,7 @@ fn launch_with_io(base:&Path,root:&Path,install:&Install,cli:bool,args:&[OsStrin
         assert_eq!(filtered_path(OsStr::new(r"E:\Obsidian;E:\Obsidian-backup;C:\Windows"),Path::new(r"e:\obsidian")).unwrap(),OsString::from(r"E:\Obsidian-backup;C:\Windows"));
     }
     #[test] fn figcraft_discovery_and_settings_preserve_existing_apps() {
-        assert_eq!(APPS.len(),13);assert_eq!(APPS[4],("filmcraft","FilmCraft"));
+        assert_eq!(APPS.len(),17);assert_eq!(APPS[4],("filmcraft","FilmCraft"));
         let app=APPS.iter().position(|(id,_)|*id=="figcraft").unwrap();assert_eq!(APPS[app].1,"FigCraft");
         let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/temp").join(format!("figcraft-discovery-{}",native::random_id().unwrap()));
         fs::create_dir_all(&root).unwrap();let folder=root.join("figcraft-0.6.0-windows-x64-portable");fs::create_dir(&folder).unwrap();
@@ -383,6 +383,18 @@ fn launch_with_io(base:&Path,root:&Path,install:&Install,cli:bool,args:&[OsStrin
         let device=config.create_device("Travel").unwrap();config.set_device_arguments(&device,"figcraft","--safe".into());
         let serialized=config.serialize();assert_eq!(Config::parse(&serialized).unwrap().serialize(),serialized);
         assert_eq!(checked_path(&root).unwrap().parent(),Some(checked_path(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/temp")).unwrap().as_path()));fs::remove_dir_all(root).unwrap();
+    }
+    #[test] fn new_portable_apps_are_discovered_without_execution() {
+        let root=std::env::temp_dir().join(format!("craft-new-apps-{}",std::process::id()));
+        fs::create_dir(&root).unwrap();
+        for (id,version) in [("anicraft","0.2.1"),("craft-anything","0.6.1"),("materialcraft","0.4.1"),("texturecraft","0.6.1")] {
+            let folder=root.join(format!("{id}-{version}-windows-x64-portable"));fs::create_dir(&folder).unwrap();
+            fs::write(folder.join(format!("{id}.exe")),b"never execute").unwrap();
+            fs::write(folder.join(format!("{id}-cli.exe")),b"never execute").unwrap();
+        }
+        let (found,warnings)=discover(&root).unwrap();assert!(warnings.is_empty());assert_eq!(found.len(),4);
+        for install in found {assert!(install.gui.is_some()&&install.cli.is_some());assert!(install.version.contains("folder hint"));}
+        fs::remove_dir_all(root).unwrap();
     }
     #[test] fn discovery_and_containment() {
         let test = std::env::temp_dir().join(format!("craft-launcher-test-{}",std::process::id()));

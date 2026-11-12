@@ -1,3 +1,11 @@
+## Unreleased: expanded installed-app catalog (2026-11-12)
+
+- Added AniCraft, Craft Anything, MaterialCraft, and TextureCraft portable GUI/CLI discovery and official release routing.
+- Added four launcher circles without moving existing circles or changing saved app/version preferences.
+- Paginated Updates into nine-app pages so all 17 apps remain accessible at the original minimum window size without overlapping native dropdowns.
+- Regression verification: 80 library tests and 3 console-agent tests passed with serial execution. One private-desktop UI fixture remains intentionally ignored; the actual reparse-point fixture cannot run without the required Windows privilege. Parallel execution exposed an existing timing-sensitive named-pipe test; it passed on serial rerun. New app discovery, both update pages, and circle resize/nonoverlap tests passed.
+- This source update does not assign a new published release version.
+
 # Release notes
 
 ## v0.2.0

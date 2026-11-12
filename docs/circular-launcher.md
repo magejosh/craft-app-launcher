@@ -1,7 +1,9 @@
 # Approved circular launcher UI
 
-The main native Win32 window uses the approved 13-node, 14-link graph from
-`.build/circle-proposal-20261016`. Node identity is mapped by application ID;
+The main native Win32 window retains the original 13-node, 14-link graph from
+`.build/circle-proposal-20261016` and adds AniCraft, Craft Anything, MaterialCraft,
+and TextureCraft in available lower-row space (17 nodes total). Original node
+positions and links are preserved. Node identity is mapped by application ID;
 installation/version selection and APPS ordering are unchanged.
 
 The 800x640 and 1280x800 proposal coordinates normalize to the actual client

@@ -17,8 +17,12 @@ Settings and logs are saved beside the launcher. You can move the launcher and a
 
 ## Supported apps
 
-The launcher recognizes portable installations of these thirteen apps under your selected apps root. Each link opens the app's official repository:
+The launcher recognizes portable installations of these seventeen apps under your selected apps root. Each link opens the app's official repository:
 
+- [AniCraft](https://github.com/storytold/anicraft)
+- [Craft Anything](https://github.com/storytold/craft-anything)
+- [MaterialCraft](https://github.com/storytold/materialcraft)
+- [TextureCraft](https://github.com/storytold/texturecraft)
 - [CADCraft](https://github.com/storytold/cadcraft)
 - [DeckCraft](https://github.com/storytold/deckcraft)
 - [DesignCraft](https://github.com/storytold/designcraft)
@@ -37,11 +41,11 @@ If you prefer the official launcher, see [ArtCraft Launcher](https://github.com/
 
 ## Features
 
-- Thirteen native circular workflow nodes linked across document, visual, and motion/audio clusters. The layout scales with the window; each node displays its installed app icon and version.
+- Seventeen native circular workflow nodes linked across document, visual, and motion/audio clusters. The layout scales with the window; each node displays its installed app icon and version.
 - An original launcher icon in the window chrome and header, with the selected apps root and profile shown below.
 - Exact GUI/CLI executable-name discovery without running apps to identify them; conservative PE file-version reporting and explicit version selection.
 - Named profiles with per-app arguments and per-computer FilmCraft compatibility settings.
-- Three Settings pages: Launcher Settings, Appearance, and Updates.
+- Three Settings pages: Launcher Settings, Appearance, and Updates. The Updates catalog uses two readable pages with Next apps / Previous apps controls.
 - System, Light, Dark, True Dark, and optional Aetherglass appearance. Glass uses supported Windows 11 DWM behavior with a solid fallback.
 - Background release-metadata checks once per startup, manual checks, explicit single-app installation, and sequential Update All.
 - Native progress bars with download bytes, percentages when totals are reliable, and completed-app counts for batches.
