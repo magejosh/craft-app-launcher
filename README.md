@@ -45,7 +45,7 @@ If you prefer the official launcher, see [ArtCraft Launcher](https://github.com/
 - An original launcher icon in the window chrome and header, with the selected apps root and profile shown below.
 - Exact GUI/CLI executable-name discovery without running apps to identify them; conservative PE file-version reporting and explicit version selection.
 - Named profiles with per-app arguments and per-computer FilmCraft compatibility settings.
-- Three Settings pages: Launcher Settings, Appearance, and Updates. The Updates catalog uses two readable pages with Next apps / Previous apps controls.
+- Three Settings pages: Launcher Settings, Appearance, and Updates. The Updates catalog is one scrollable list.
 - System, Light, Dark, True Dark, and optional Aetherglass appearance. Glass uses supported Windows 11 DWM behavior with a solid fallback.
 - Background release-metadata checks once per startup, manual checks, explicit single-app installation, and sequential Update All.
 - Native progress bars with download bytes, percentages when totals are reliable, and completed-app counts for batches.

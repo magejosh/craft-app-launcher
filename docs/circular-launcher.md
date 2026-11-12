@@ -1,10 +1,15 @@
 # Approved circular launcher UI
 
-The main native Win32 window retains the original 13-node, 14-link graph from
-`.build/circle-proposal-20261016` and adds AniCraft, Craft Anything, MaterialCraft,
-and TextureCraft in available lower-row space (17 nodes total). Original node
-positions and links are preserved. Node identity is mapped by application ID;
-installation/version selection and APPS ordering are unchanged.
+The main native Win32 window groups related tools across Documents, Visual Tools,
+and Motion + Audio. AniCraft belongs to Motion + Audio and links to VectorCraft
+for 2D vector animation and EffectCraft for effects work. MaterialCraft and
+TextureCraft are a linked pair in Visual Tools; Craft Anything links to FigCraft
+for interface and app creation. The original circular visual language remains,
+with local node shifts to keep all 17 nodes and their links clear.
+
+Application identity, installation selection, and settings remain independent
+of graph coordinates. Tests check the workflow links, node spacing, bounds, and
+connector clearance across supported sizes.
 
 The 800x640 and 1280x800 proposal coordinates normalize to the actual client
 area. Diameter interpolates from 96 to 126 pixels and conservatively fits both

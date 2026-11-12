@@ -1,3 +1,12 @@
+## Unreleased: creative workflow map and scrollable Updates (2026-11-12)
+
+- Grouped AniCraft with Motion + Audio and linked it to VectorCraft and EffectCraft.
+- Paired MaterialCraft and TextureCraft under Visual Tools; linked Craft Anything to FigCraft for interface/app creation.
+- Replaced Updates pagination with one native scrolling table, retaining readable dropdowns and fixed headers/actions/release details.
+- Scrollbar, mouse-wheel, keyboard scrolling, and focused-row reveal are supported. Settings and version selections remain unchanged.
+- Verification: 82 library tests and 3 agent tests passed serially, including native scrolling and semantic graph-link checks. One private-desktop fixture remains ignored; the privileged reparse fixture remains unavailable.
+- Screenshot-based QA could not run: connected-computer UI inventory timed out and the supplied screenshot's Library transfer helper requires xattrs unavailable on Windows. Native hidden-window tests cover scroll/layout behavior.
+
 ## Unreleased: expanded installed-app catalog (2026-11-12)
 
 - Added AniCraft, Craft Anything, MaterialCraft, and TextureCraft portable GUI/CLI discovery and official release routing.

@@ -642,16 +642,68 @@ pub fn layout_controls(hwnd:Hwnd,moves:&[(Hwnd,Rect)]){
         RedrawWindow(hwnd,ptr::null(),0,0x1|0x4|0x80|0x400); // INVALIDATE | ERASE | ALLCHILDREN | FRAME; queued, no UPDATENOW
     }
 }
+// The update table owns its viewport. Headers/actions stay fixed in Settings.
+#[repr(C)] struct ScrollInfo {size:u32,mask:u32,min:i32,max:i32,page:u32,pos:i32,track:i32}
+#[link(name="user32")] extern "system" {
+    fn SetScrollInfo(hwnd:Hwnd,bar:i32,info:*const ScrollInfo,redraw:i32)->i32;
+    fn GetScrollInfo(hwnd:Hwnd,bar:i32,info:*mut ScrollInfo)->i32;
+}
+fn update_scroll_limit(view_height:i32)->i32 {(crate::core::APPS.len() as i32*30-view_height).max(0)}
+fn update_scroll_position(hwnd:Hwnd)->i32 {unsafe{GetPropW(hwnd,wide("CraftLauncher.UpdateScroll").as_ptr()) as i32}}
+fn set_update_scroll(hwnd:Hwnd,position:i32){unsafe{
+    let mut r:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut r);
+    let position=position.clamp(0,update_scroll_limit(r.bottom));
+    SetPropW(hwnd,wide("CraftLauncher.UpdateScroll").as_ptr(),position as isize);
+    layout_update_scroll(hwnd);
+}}
+pub fn layout_update_scroll(hwnd:Hwnd){if hwnd==0{return;}unsafe{
+    struct Rows{parent:Hwnd,width:i32,offset:i32,moves:Vec<(Hwnd,Rect)>}
+    unsafe extern "system" fn collect(child:Hwnd,data:isize)->i32 {
+        let rows=&mut*(data as *mut Rows);if GetAncestor(child,1)!=rows.parent{return 1;}
+        let x=GetPropW(child,wide("DesignX").as_ptr()) as i32-1;let y=GetPropW(child,wide("DesignY").as_ptr()) as i32-1;
+        let w=GetPropW(child,wide("DesignW").as_ptr()) as i32-1;let h=GetPropW(child,wide("DesignH").as_ptr()) as i32-1;
+        if x>=0&&y>=0&&w>0&&h>0 {let left=x*rows.width/936;let top=y-rows.offset;rows.moves.push((child,Rect{left,top,right:left+w*rows.width/936,bottom:top+h}));}1
+    }
+    let mut r:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut r);let offset=update_scroll_position(hwnd).clamp(0,update_scroll_limit(r.bottom));
+    SetPropW(hwnd,wide("CraftLauncher.UpdateScroll").as_ptr(),offset as isize);
+    let info=ScrollInfo{size:std::mem::size_of::<ScrollInfo>()as u32,mask:7,min:0,max:crate::core::APPS.len()as i32*30-1,page:r.bottom.max(1)as u32,pos:offset,track:0};SetScrollInfo(hwnd,1,&info,1);
+    GetClientRect(hwnd,&mut r);let mut rows=Rows{parent:hwnd,width:r.right,offset,moves:Vec::new()};EnumChildWindows(hwnd,Some(collect),(&mut rows as *mut Rows)as isize);layout_controls(hwnd,&rows.moves);
+}}
+unsafe extern "system" fn update_scroll_proc(hwnd:Hwnd,msg:u32,w:usize,l:isize,_id:usize,_data:usize)->Lresult {
+    match msg {
+        0x5=>{layout_update_scroll(hwnd);return 0;},
+        0x14=>return erase_background(hwnd,w as Handle),
+        0x111|0x2B|0x133..=0x138=>return SendMessageW(GetAncestor(hwnd,1),msg,w,l),
+        0x115=>{let mut r:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut r);let current=update_scroll_position(hwnd);let next=match w&0xffff{0=>current-30,1=>current+30,2=>current-r.bottom,3=>current+r.bottom,4|5=>{let mut info=ScrollInfo{size:std::mem::size_of::<ScrollInfo>()as u32,mask:16,min:0,max:0,page:0,pos:0,track:0};GetScrollInfo(hwnd,1,&mut info);info.track},6=>0,7=>update_scroll_limit(r.bottom),_=>current};set_update_scroll(hwnd,next);return 0;},
+        0x20A=>{let delta=((w>>16)as u16)as i16 as i32;let previous=GetPropW(hwnd,wide("CraftLauncher.WheelRemainder").as_ptr())as i32;let total=previous+delta;SetPropW(hwnd,wide("CraftLauncher.WheelRemainder").as_ptr(),(total%120)as isize);set_update_scroll(hwnd,update_scroll_position(hwnd)-(total/120)*90);return 0;},
+        0x87=>return 1, // DLGC_WANTARROWS, leave Tab to dialog traversal.
+        0x100=>{let command=match w{0x21=>Some(2),0x22=>Some(3),0x24=>Some(6),0x23=>Some(7),0x26=>Some(0),0x28=>Some(1),_=>None};if let Some(command)=command{return SendMessageW(hwnd,0x115,command,0);}},
+        0x82=>{RemoveWindowSubclass(hwnd,Some(update_scroll_proc),0xCA21);RemovePropW(hwnd,wide("CraftLauncher.UpdateScroll").as_ptr());RemovePropW(hwnd,wide("CraftLauncher.WheelRemainder").as_ptr());},_=>()
+    }DefSubclassProc(hwnd,msg,w,l)
+}
+unsafe extern "system" fn update_scroll_child_proc(hwnd:Hwnd,msg:u32,w:usize,l:isize,_id:usize,_data:usize)->Lresult {
+    let parent=GetAncestor(hwnd,1);
+    match msg {
+        0x7=>{let y=GetPropW(hwnd,wide("DesignY").as_ptr()) as i32-1;let mut r:Rect=std::mem::zeroed();GetClientRect(parent,&mut r);let current=update_scroll_position(parent);if y<current{set_update_scroll(parent,y);}else if y+30>current+r.bottom{set_update_scroll(parent,y+30-r.bottom);}},
+        0x20A=>{if SendMessageW(hwnd,0x157,0,0)==0{return SendMessageW(parent,msg,w,l);}}, // Preserve an open combo's wheel.
+        0x100 if matches!(w,0x21|0x22)=>{if SendMessageW(hwnd,0x157,0,0)==0{return SendMessageW(parent,msg,w,l);}},
+        0x82=>{RemoveWindowSubclass(hwnd,Some(update_scroll_child_proc),0xCA22);},_=>()
+    }DefSubclassProc(hwnd,msg,w,l)
+}
+pub fn init_update_scroll(hwnd:Hwnd){unsafe{SetWindowLongPtrW(hwnd,-20,GetWindowLongPtrW(hwnd,-20)|0x10000);SetWindowSubclass(hwnd,Some(update_scroll_proc),0xCA21,0);}}
+pub fn update_scroll_child(hwnd:Hwnd){unsafe{SetWindowSubclass(hwnd,Some(update_scroll_child_proc),0xCA22,0);}}
+#[test]fn update_scroll_limits_fit_short_and_long_views(){assert_eq!(update_scroll_limit(386),124);assert_eq!(update_scroll_limit(510),0);assert_eq!(update_scroll_limit(800),0);}
+
 pub fn layout_settings(hwnd:Hwnd){
     if hwnd==0{return;}
-    struct Layout {width:i32,height:i32,moves:Vec<(Hwnd,Rect)>}
+    struct Layout {root:Hwnd,width:i32,height:i32,moves:Vec<(Hwnd,Rect)>}
     unsafe extern "system" fn collect(child:Hwnd,data:isize)->i32 {
-        let layout=&mut*(data as *mut Layout);let x=GetPropW(child,wide("DesignX").as_ptr())-1;let y=GetPropW(child,wide("DesignY").as_ptr())-1;let w=GetPropW(child,wide("DesignW").as_ptr())-1;let h=GetPropW(child,wide("DesignH").as_ptr())-1;
+        let layout=&mut*(data as *mut Layout);if GetAncestor(child,1)!=layout.root{return 1;}let x=GetPropW(child,wide("DesignX").as_ptr())-1;let y=GetPropW(child,wide("DesignY").as_ptr())-1;let w=GetPropW(child,wide("DesignW").as_ptr())-1;let h=GetPropW(child,wide("DesignH").as_ptr())-1;
         if x>=0&&y>=0&&w>0&&h>0 {let left=x as i32*layout.width/1000;let top=y as i32*layout.height/680;layout.moves.push((child,Rect{left,top,right:left+w as i32*layout.width/1000,bottom:top+h as i32*layout.height/680}));}1
     }
     unsafe {
         let mut rect:Rect=std::mem::zeroed();GetClientRect(hwnd,&mut rect);
-        let mut layout=Layout{width:rect.right,height:rect.bottom,moves:Vec::new()};EnumChildWindows(hwnd,Some(collect),(&mut layout as *mut Layout)as isize);
+        let mut layout=Layout{root:hwnd,width:rect.right,height:rect.bottom,moves:Vec::new()};EnumChildWindows(hwnd,Some(collect),(&mut layout as *mut Layout)as isize);
         // CreateWindowEx puts new child windows at the bottom. Lower decoration cards
         // only after all foreground children exist; never lower app-icon ownerdraw statics.
         for (child,_) in &layout.moves {if GetPropW(*child,wide("CraftLauncher.BackgroundCard").as_ptr())!=0{SetWindowPos(*child,1,0,0,0,0,0x1|0x2|0x10|0x8);}} // HWND_BOTTOM; NOSIZE | NOMOVE | NOACTIVATE | NOREDRAW
@@ -788,7 +840,7 @@ unsafe fn paint_launcher_content(dc:Handle,r:Rect){let saved=SaveDC(dc);if saved
     let icon=launcher_icon(GetModuleHandleW(ptr::null()),false);if icon!=0{DrawIconEx(dc,24,21,icon,32,32,0,0,3);}
     draw("Craft App Launcher",Rect{left:68,top:19,right:w-180,bottom:52},title_font,p.text,0);
     LAUNCHER_CONTEXT.with(|v|{let v=v.borrow();draw(&v.0,Rect{left:26,top:78,right:w-240,bottom:98},small_font,p.muted,0);draw(&v.1,Rect{left:w-230,top:78,right:w-26,bottom:98},small_font,p.muted,2);});
-    for(text,x,y)in[("DOCUMENTS",37.,116.),("VISUAL TOOLS",355.,116.),("MOTION + AUDIO",605.,226.)]{let(x,y)=circles::point(w,h,x,y);draw(text,Rect{left:x,top:y,right:x+170,bottom:y+18},label_font,p.muted,0);}
+    for(text,x,y)in[("DOCUMENTS",37.,116.),("VISUAL TOOLS",355.,116.),("MOTION + AUDIO",605.,116.)]{let(x,y)=circles::point(w,h,x,y);draw(text,Rect{left:x,top:y,right:x+170,bottom:y+18},label_font,p.muted,0);}
     RestoreDC(dc,saved);for object in[pen,title_font,small_font,label_font]{DeleteObject(object);}
 }
 

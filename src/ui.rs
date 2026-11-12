@@ -1,7 +1,7 @@
 use crate::progress::{WorkProgress,Phase};
 use crate::{actions,owner,updates,installer,core::{self,Config,Install,Profile,ThemeMode,APPS},native::{self,*}};
 use std::{cell::{Cell,RefCell},path::PathBuf,ptr,sync::{mpsc::{self,Receiver,TryRecvError},Arc,atomic::{AtomicBool,Ordering}},thread,time::{Duration,Instant}};
-const UPDATES_PAGE:i32=853;const UPDATE_PAGE_SIZE:usize=9;
+const UPDATE_LIST:i32=853;
 const ROW_PROGRESS:i32=1100;const BATCH_PROGRESS:i32=1120;
 const TAB_LAUNCHER:i32=850;const TAB_APPEARANCE:i32=851;const TAB_UPDATES:i32=852;const ROW_STATUS:i32=980;const ROW_LATEST:i32=1000;const UPDATE_BADGE:i32=111;const RELEASE_TITLE:i32=867;
 const DEVICE:i32=840;const DEVICE_NAME:i32=841;const CREATE_DEVICE:i32=842;
@@ -25,7 +25,7 @@ struct State {
     hwnd:Hwnd,base:PathBuf,config:Config,machine:Option<String>,device:String,config_error:Option<String>,installs:Vec<Install>,canonical_root:Option<PathBuf>,
     icons:[Handle;APPS.len()],font:Handle,name_font:Handle,detail_font:Handle,
     discovery_error:Option<String>,scanning:bool,scan_generation:u64,scan_receiver:Option<Receiver<ScanResult>>,pending_scan:Option<ScanRequest>,
-    settings:Hwnd,settings_tab:usize,updates_page:usize,root_draft:Option<String>,profile_draft:String,settings_app:Option<usize>,settings_versions:Vec<usize>,details:String,
+    settings:Hwnd,settings_tab:usize,root_draft:Option<String>,profile_draft:String,settings_app:Option<usize>,settings_versions:Vec<usize>,details:String,
     launch_check_started:bool,release_app:Option<usize>,preferred_rows:[Vec<usize>;APPS.len()],releases:std::collections::BTreeMap<usize,Result<updates::Release,String>>,work:Option<Receiver<WorkResult>>,cancel:Arc<AtomicBool>,progress:Arc<WorkProgress>,work_status:String,
 }
 thread_local! {static STATE:RefCell<Option<State>>=const {RefCell::new(None)};static THEME:Cell<ThemeMode>=const {Cell::new(ThemeMode::System)};static THEME_UPDATING:Cell<bool>=const {Cell::new(false)};static MAIN:Cell<Hwnd>=const {Cell::new(0)};static OPTIONS:Cell<Hwnd>=const {Cell::new(0)};}
@@ -56,7 +56,7 @@ fn apply_theme(mode:ThemeMode) {
     MAIN.with(|v|native::theme_window(v.get()));OPTIONS.with(|v|theme_settings(v.get(),mode));THEME_UPDATING.with(|v|v.set(false));
 }
 fn theme_changed() {apply_theme(THEME.with(|v|v.get()));}
-fn control(hwnd:Hwnd,id:i32)->Hwnd {unsafe {GetDlgItem(hwnd,id)}}
+fn control(hwnd:Hwnd,id:i32)->Hwnd {unsafe {let direct=GetDlgItem(hwnd,id);if direct!=0{direct}else{GetDlgItem(GetDlgItem(hwnd,UPDATE_LIST),id)}}}
 const DRAFT_CONFLICT:&str="An agent changed a field with an unsaved draft. Review it before Save, or close and reopen to discard it.";
 fn status(s:&State,text:&str) {let message=if (s.options_conflict||s.root_conflict)&&!text.starts_with(DRAFT_CONFLICT){format!("{DRAFT_CONFLICT} {text}")}else{text.to_owned()};native::set_text(control(s.hwnd,STATUS),&message);unsafe {let hwnd=control(s.hwnd,STATUS);if hwnd!=0&&(GetWindowLongPtrW(hwnd,-16)&0x10000000!=0)!=!message.is_empty(){ShowWindow(hwnd,if message.is_empty(){0}else{5});}}}
 fn discard_conflicts(s:&mut State){let conflicted=s.root_conflict||s.options_conflict;if s.root_conflict{s.root_draft=None;}s.root_conflict=false;s.options_conflict=false;if conflicted{status(s,"");}}
@@ -352,10 +352,12 @@ fn open_settings(s:&mut State,app:Option<usize>) {s.options_conflict=false;if ap
                 design_child(hwnd,"BUTTON","Check updates",0x10000,32,110,164,28,CHECK_UPDATES,f,false);design_child(hwnd,"BUTTON","Update All",0x10000,208,110,142,28,UPDATE_ALL,f,false);design_child(hwnd,"STATIC","",0,362,110,464,22,UPDATE_STATUS,f,false);design_child(hwnd,"BUTTON","Cancel",0x10000,840,110,128,28,CANCEL_WORK,f,false);
                 native::init_progress_controls();design_child(hwnd,"msctls_progress32","",8,362,135,464,4,BATCH_PROGRESS,f,false);
                 for(text,x,w)in[("App",32,142),("Installed / preferred",186,226),("Latest",426,90),("Progress / state",530,280),("Action",824,144)]{design_child(hwnd,"STATIC",text,0,x,142,w,24,0,f,false);}
-                let start=s.updates_page*UPDATE_PAGE_SIZE;
-                for app in start..(start+UPDATE_PAGE_SIZE).min(APPS.len()){let y=168+(app-start) as i32*30;design_child(hwnd,"STATIC",APPS[app].1,0,32,y,142,26,0,f,false);design_child(hwnd,"STATIC","Not checked",0,426,y,90,26,ROW_LATEST+app as i32,f,false);design_child(hwnd,"STATIC","Not checked",0,530,y,280,20,ROW_STATUS+app as i32,f,false);design_child(hwnd,"COMBOBOX","",0x10000|3|0x200000,186,y,226,220,PREFERRED+app as i32,f,false);design_child(hwnd,"BUTTON","Details...",0x10000,824,y,144,24,APP_ROW+app as i32,f,false);design_child(hwnd,"msctls_progress32","",8,530,y+22,280,5,ROW_PROGRESS+app as i32,f,false);}
-                design_child(hwnd,"STATIC",&format!("Apps {}-{} of {}",start+1,(start+UPDATE_PAGE_SIZE).min(APPS.len()),APPS.len()),0,32,448,600,28,0,f,false);
-                design_child(hwnd,"BUTTON",if s.updates_page==0{"Next apps"}else{"Previous apps"},0x10000,824,448,144,28,UPDATES_PAGE,f,false);
+                let list=design_child(hwnd,"STATIC","",0x00200000|0x02000000|0x10000,32,168,936,386,UPDATE_LIST,f,false);
+                native::init_update_scroll(list);
+                for app in 0..APPS.len(){let y=app as i32*30;
+                    for handle in [design_child(list,"STATIC",APPS[app].1,0,0,y,142,26,0,f,false),design_child(list,"STATIC","Not checked",0,394,y,90,26,ROW_LATEST+app as i32,f,false),design_child(list,"STATIC","Not checked",0,498,y,280,20,ROW_STATUS+app as i32,f,false),design_child(list,"COMBOBOX","",0x10000|3|0x200000,154,y,226,220,PREFERRED+app as i32,f,false),design_child(list,"BUTTON","Details...",0x10000,792,y,144,24,APP_ROW+app as i32,f,false),design_child(list,"msctls_progress32","",8,498,y+22,280,5,ROW_PROGRESS+app as i32,f,false)] {native::update_scroll_child(handle);}
+                }
+                native::layout_update_scroll(list);
                 design_child(hwnd,"STATIC","Select an app's Details or Install action",0,32,566,680,28,RELEASE_TITLE,heading,false);
                 design_child(hwnd,"EDIT","",4|0x800|0x40|0x200000,32,598,936,32,RELEASE_DETAILS,f,false);
                 design_child(hwnd,"COMBOBOX","",0x10000|3|0x200000,32,636,600,180,RELEASE_ASSETS,f,false);design_child(hwnd,"BUTTON","Install selected...",0x10000,648,636,320,30,DOWNLOAD,f,false);
@@ -373,7 +375,7 @@ fn show_release_details(s:&State){
     unsafe{let combo=control(s.settings,RELEASE_ASSETS);SendMessageW(combo,0x14B,0,0);for asset in assets{SendMessageW(combo,0x143,0,wide(asset).as_ptr()as isize);}}work_status(s);
 }
 fn open_release(s:&mut State,app:usize){
-    s.release_app=Some(app);let page=app/UPDATE_PAGE_SIZE;if s.settings==0||s.settings_app.is_some()||s.settings_tab!=2||s.updates_page!=page{s.updates_page=page;s.settings_tab=2;open_settings(s,None);s.release_app=Some(app);}show_release_details(s);unsafe{SetFocus(control(s.settings,RELEASE_ASSETS));}
+    s.release_app=Some(app);if s.settings==0||s.settings_app.is_some()||s.settings_tab!=2{s.settings_tab=2;open_settings(s,None);s.release_app=Some(app);}show_release_details(s);unsafe{SetFocus(control(s.settings,RELEASE_ASSETS));}
 }
 fn app_menu(s:&mut State,app:usize,x:i32,y:i32) {
     unsafe {
@@ -413,7 +415,6 @@ unsafe extern "system" fn settings_proc(hwnd:Hwnd,msg:u32,w:usize,l:isize)->Lres
                 if (PREFERRED..PREFERRED+APPS.len() as i32).contains(&id)&&notification==1 {let app=(id-PREFERRED)as usize;let row=SendMessageW(control(hwnd,id),0x147,0,0);if row>=0{if let Some(index)=s.preferred_rows[app].get(row as usize).copied(){choose_version(s,app,index);}}return;}
                 if notification!=0{return;}if (APP_ROW..APP_ROW+APPS.len() as i32).contains(&id){open_release(s,(id-APP_ROW)as usize);return;}
                 match id{
-                    UPDATES_PAGE=>{s.updates_page=if s.updates_page==0{1}else{0};open_settings(s,None);},
                     TAB_LAUNCHER|TAB_APPEARANCE|TAB_UPDATES=>{s.settings_tab=(id-TAB_LAUNCHER)as usize;open_settings(s,None);},
                     CREATE_DEVICE=>{
                         let mut candidate=s.config.clone();match candidate.create_device(&native::text(control(hwnd,DEVICE_NAME))){
@@ -596,7 +597,7 @@ pub fn run() {
         for app in 0..APPS.len(){let button=child(hwnd,"BUTTON",&format!("{}\nLoading...",APPS[app].1),0x10000|0xB,0,0,272,180,TILE+app as i32,name_font);native::set_detail_font(button,detail_font);native::install_tile_feedback(button);}
         child(hwnd,"STATIC","Loading installed apps...",0x4000,48,746,1184,22,STATUS,detail_font);layout(hwnd);
         let machine=native::machine_identity();let device=config.selected_device(machine.as_deref()).to_owned();
-        let first_run=config.root.is_none();let mut state=State{bulk_progress:None,closing:false,observed,agent,receipts:actions::Receipts::default(),agent_work:None,options_conflict:false,root_conflict:false,settings_profile:"Default".into(),#[cfg(test)] hidden_fixture:false,hwnd,base,config,machine,device,config_error,installs:Vec::new(),canonical_root:None,icons:[0;APPS.len()],font,name_font,detail_font,discovery_error:None,scanning:false,scan_generation:0,scan_receiver:None,pending_scan:None,settings:0,settings_tab:0,updates_page:0,root_draft:None,profile_draft:String::new(),settings_app:None,settings_versions:Vec::new(),details:String::new(),launch_check_started:false,release_app:None,preferred_rows:std::array::from_fn(|_|Vec::new()),releases:std::collections::BTreeMap::new(),work:None,cancel:Arc::new(AtomicBool::new(false)),progress:Arc::new(WorkProgress::new(0)),work_status:"Official releases - updates not checked. Select an app row for release details.".into()};
+        let first_run=config.root.is_none();let mut state=State{bulk_progress:None,closing:false,observed,agent,receipts:actions::Receipts::default(),agent_work:None,options_conflict:false,root_conflict:false,settings_profile:"Default".into(),#[cfg(test)] hidden_fixture:false,hwnd,base,config,machine,device,config_error,installs:Vec::new(),canonical_root:None,icons:[0;APPS.len()],font,name_font,detail_font,discovery_error:None,scanning:false,scan_generation:0,scan_receiver:None,pending_scan:None,settings:0,settings_tab:0,root_draft:None,profile_draft:String::new(),settings_app:None,settings_versions:Vec::new(),details:String::new(),launch_check_started:false,release_app:None,preferred_rows:std::array::from_fn(|_|Vec::new()),releases:std::collections::BTreeMap::new(),work:None,cancel:Arc::new(AtomicBool::new(false)),progress:Arc::new(WorkProgress::new(0)),work_status:"Official releases - updates not checked. Select an app row for release details.".into()};
         if let Some(error)=agent_error{let _=core::log(&state.base,&error);details(&mut state,error.clone());status(&state,&error);}
         if let Some(error)=state.config_error.clone(){details(&mut state,error);status(&state,"Settings could not be read. Open Settings for details; the file will not be overwritten.");}
         STATE.with(|slot|*slot.borrow_mut()=Some(state));ShowWindow(hwnd,5);UpdateWindow(hwnd);
@@ -627,7 +628,7 @@ pub fn run() {
             let host=CreateWindowExW(0,wide("STATIC").as_ptr(),wide("owned hidden page host").as_ptr(),0x80000000|0x02000000,0,0,1000,680,0,0,GetModuleHandleW(ptr::null()),ptr::null_mut());assert_ne!(host,0);
             let fixture=Fixture{host,hwnd:CreateWindowExW(0,wide("STATIC").as_ptr(),wide("owned hidden three-page test").as_ptr(),0x40000000|0x10000000|0x02000000,0,0,1000,680,host,0,GetModuleHandleW(ptr::null()),ptr::null_mut()),font:native::segoe_font(16),heading:native::segoe_font(20),detail:native::segoe_font(14)};assert_ne!(fixture.hwnd,0);let mut client:Rect=std::mem::zeroed();assert_ne!(GetClientRect(fixture.hwnd,&mut client),0);assert_eq!((client.right,client.bottom),(1000,680));
             let root=PathBuf::from(r"E:\owned-model-only");
-            let mut s=State{bulk_progress:None,closing:false,observed:actions::disk_hash(&root).unwrap(),agent:None,receipts:actions::Receipts::default(),agent_work:None,options_conflict:false,root_conflict:false,settings_profile:"Default".into(),hidden_fixture:true,hwnd:0,base:root.clone(),config:Config::default(),machine:None,device:"Default".into(),config_error:None,installs:Vec::new(),canonical_root:Some(root.clone()),icons:[0;APPS.len()],font:fixture.font,name_font:fixture.heading,detail_font:fixture.detail,discovery_error:None,scanning:false,scan_generation:0,scan_receiver:None,pending_scan:None,settings:fixture.hwnd,settings_tab:0,updates_page:0,root_draft:None,profile_draft:String::new(),settings_app:None,settings_versions:Vec::new(),details:"owned fixture scan details".into(),launch_check_started:false,release_app:None,preferred_rows:std::array::from_fn(|_|Vec::new()),releases:std::collections::BTreeMap::new(),work:None,cancel:Arc::new(AtomicBool::new(false)),progress:Arc::new(WorkProgress::new(0)),work_status:"Not checked".into()};
+            let mut s=State{bulk_progress:None,closing:false,observed:actions::disk_hash(&root).unwrap(),agent:None,receipts:actions::Receipts::default(),agent_work:None,options_conflict:false,root_conflict:false,settings_profile:"Default".into(),hidden_fixture:true,hwnd:0,base:root.clone(),config:Config::default(),machine:None,device:"Default".into(),config_error:None,installs:Vec::new(),canonical_root:Some(root.clone()),icons:[0;APPS.len()],font:fixture.font,name_font:fixture.heading,detail_font:fixture.detail,discovery_error:None,scanning:false,scan_generation:0,scan_receiver:None,pending_scan:None,settings:fixture.hwnd,settings_tab:0,root_draft:None,profile_draft:String::new(),settings_app:None,settings_versions:Vec::new(),details:"owned fixture scan details".into(),launch_check_started:false,release_app:None,preferred_rows:std::array::from_fn(|_|Vec::new()),releases:std::collections::BTreeMap::new(),work:None,cancel:Arc::new(AtomicBool::new(false)),progress:Arc::new(WorkProgress::new(0)),work_status:"Not checked".into()};
             let bounds=|hwnd|{let mut r:Rect=std::mem::zeroed();assert_ne!(GetWindowRect(hwnd,&mut r),0);r};
             open_settings(&mut s,None);assert_eq!(IsWindowVisible(fixture.hwnd),0);assert_eq!(GetPropW(fixture.hwnd,wide("SysSetRedraw").as_ptr()),0);native::set_text(control(s.settings,ROOT),r"F:\draft root");native::set_text(control(s.settings,DEVICE_NAME),"Draft Surface");
             let root_before=bounds(control(s.settings,ROOT));
@@ -638,14 +639,17 @@ pub fn run() {
             for (app,(id,_)) in APPS.iter().enumerate(){let name=format!("{id}-1.2.3-windows-x64-portable.zip");let asset=format!(r#"{{"name":"{name}","browser_download_url":"https://github.com/storytold/{id}/releases/download/v1.2.3/{name}","size":123,"digest":"sha256:{}"}}"#,"a".repeat(64));let json=format!(r#"{{"tag_name":"v1.2.3","draft":false,"prerelease":false,"assets":[{}]}}"#,if app==5{""}else{&asset});s.releases.insert(app,updates::parse_release_for(app,json.as_bytes()));if app!=4{s.installs.push(Install{app,gui:None,cli:None,folder:root.join(id),version:if app==0{"1.2.3.0 [PE file version]"}else if app==2{"Unknown; folder hint 1.0.0"}else{"1.0.0.0 [PE file version]"}.into()});}}
             s.releases.insert(3,Err("fixture metadata error".into()));s.work_status="Checked all 13 official releases.\r\nA long worker detail remains bounded.".into();fill_preferred(&mut s);work_status(&s);
             for (app,status,action) in [(0,"Up to date","Details..."),(1,"Update available","Install..."),(2,"Unknown","Review..."),(3,"Error","Details..."),(4,"Not installed","Install..."),(5,"Update available","Details...")] {assert_eq!(native::text(control(s.settings,ROW_STATUS+app)),status);assert_eq!(native::text(control(s.settings,APP_ROW+app)),action);}
-            for app in 0..UPDATE_PAGE_SIZE as i32-1{let row=bounds(control(s.settings,PREFERRED+app));let next=bounds(control(s.settings,PREFERRED+app+1));assert!(row.bottom<=next.top,"preferred controls overlap at row {app}: closed top={} bottom={} next_top={} selection_height={} list_height={}",row.top,row.bottom,next.top,SendMessageW(control(s.settings,PREFERRED+app),0x154,usize::MAX,0),SendMessageW(control(s.settings,PREFERRED+app),0x154,0,0));}
+            for app in 0..APPS.len() as i32-1{let row=bounds(control(s.settings,PREFERRED+app));let next=bounds(control(s.settings,PREFERRED+app+1));assert!(row.bottom<=next.top,"preferred controls overlap at row {app}: closed top={} bottom={} next_top={} selection_height={} list_height={}",row.top,row.bottom,next.top,SendMessageW(control(s.settings,PREFERRED+app),0x154,usize::MAX,0),SendMessageW(control(s.settings,PREFERRED+app),0x154,0,0));}
             // Creation height includes the drop-down extent; the closed HWND must fit one row.
             let closed=bounds(control(s.settings,PREFERRED));let mut dropped:Rect=std::mem::zeroed();assert_ne!(SendMessageW(control(s.settings,PREFERRED),0x152,0,(&mut dropped as *mut Rect)as isize),0);assert!(dropped.bottom>closed.bottom);
             assert_eq!(update_count(&s),APPS.len()-4);assert_eq!(native::text(control(s.settings,TAB_UPDATES)),format!("Updates ({})",APPS.len()-4));assert_eq!(native::text(control(s.settings,ROW_LATEST)),"v1.2.3");
-            let last=bounds(control(s.settings,PREFERRED+UPDATE_PAGE_SIZE as i32-1));let header=bounds(control(s.settings,RELEASE_TITLE));assert!(last.bottom+8<=header.top);
-            s.updates_page=1;open_settings(&mut s,None);assert_eq!(control(s.settings,PREFERRED),0);
-            for app in UPDATE_PAGE_SIZE..APPS.len(){let r=bounds(control(s.settings,PREFERRED+app as i32));assert!(r.bottom+8<=bounds(control(s.settings,RELEASE_TITLE)).top);if app+1<APPS.len(){assert!(r.bottom<=bounds(control(s.settings,PREFERRED+app as i32+1)).top);}}
-            s.updates_page=0;open_settings(&mut s,None);
+            let list=control(s.settings,UPDATE_LIST);let header=bounds(control(s.settings,RELEASE_TITLE));let list_bounds=bounds(list);assert!(list_bounds.bottom+8<=header.top);
+            let first_before=bounds(control(s.settings,PREFERRED));SendMessageW(list,0x115,7,0); // SB_BOTTOM
+            let last=bounds(control(s.settings,PREFERRED+APPS.len() as i32-1));assert!(last.top>=list_bounds.top&&last.bottom<=list_bounds.bottom);
+            assert!(bounds(control(s.settings,PREFERRED)).top<first_before.top);SendMessageW(list,0x115,6,0); // SB_TOP
+            assert_eq!(bounds(control(s.settings,PREFERRED)).top,first_before.top);
+            SendMessageW(list,0x20A,((-120i16 as u16 as usize)<<16),0);assert!(bounds(control(s.settings,PREFERRED)).top<first_before.top);
+            SendMessageW(list,0x115,6,0);SendMessageW(list,0x100,0x22,0);assert!(bounds(control(s.settings,PREFERRED)).top<first_before.top);SendMessageW(list,0x115,6,0);
             s.release_app=Some(1);show_release_details(&s);assert_eq!(SendMessageW(control(s.settings,RELEASE_ASSETS),0x147,0,0),-1);assert_eq!(IsWindowEnabled(control(s.settings,DOWNLOAD)),0);
             SendMessageW(control(s.settings,RELEASE_ASSETS),0x14E,0,0);work_status(&s);assert_ne!(IsWindowEnabled(control(s.settings,DOWNLOAD)),0);assert!(s.work.is_none());
             let detail_after=bounds(control(s.settings,RELEASE_DETAILS));assert_eq!((detail_before.left,detail_before.top,detail_before.right,detail_before.bottom),(detail_after.left,detail_after.top,detail_after.right,detail_after.bottom));assert!(header.bottom+4<=detail_after.top);assert!(detail_after.bottom+6<=bounds(control(s.settings,RELEASE_ASSETS)).top);for id in [RELEASE_ASSETS,DOWNLOAD,OPEN_RELEASE]{let r=bounds(control(s.settings,id));assert!(r.bottom<=680&&r.right<=1000,"footer control {id} exceeds client bounds");}
